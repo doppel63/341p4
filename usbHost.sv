@@ -45,6 +45,7 @@ endmodule: usbHost
 // asserts last when on the last bit of the bit stream.
 module bitStreamEncoder(
   input   logic        clk, rst,
+  input   logic        pkt_avail,
   input   logic [7:0]  pid_in,
   input   logic [6:0]  addr_in,
   input   logic [3:0]  endp_in,
@@ -53,7 +54,6 @@ module bitStreamEncoder(
   output  logic        bit_out, last);
 
   // internal wires
-  // possible values of pid
   enum logic [7:0] {OUT = 8'b1110_0001, IN = 8'b0110_1001,
                     DATA0 = 8'b1100_0011,
                     ACK = 8'b1101_0010, NAK = 8'b0101_1010} pid;
@@ -74,13 +74,13 @@ module bitStreamEncoder(
 
   // instantiate stuff in datapath
   // counters = registers for these
-  counter #(8)  pidReg(.clk(clk), .rst(rst), .clr(), .ld(sent_sync), .en(),
+  counter #(8)  pidReg(.clk(clk), .rst(rst), .clr(), .ld(pkt_avail), .en(),
                        .up(), .val(pid_in), .cnt(pid));
-  counter #(7)  addrReg(.clk(clk), .rst(rst), .clr(), .ld(sent_sync), .en(),
+  counter #(7)  addrReg(.clk(clk), .rst(rst), .clr(), .ld(pkt_avail), .en(),
                         .up(), .val(addr_in), .cnt(addr));
-  counter #(4)  endpReg(.clk(clk), .rst(rst), .clr(), .ld(sent_sync), .en(),
+  counter #(4)  endpReg(.clk(clk), .rst(rst), .clr(), .ld(pkt_avail), .en(),
                         .up(), .val(endp_in), .cnt(endp));
-  counter #(64) dataReg(.clk(clk), .rst(rst), .clr(), .ld(sent_sync), .en(),
+  counter #(64) dataReg(.clk(clk), .rst(rst), .clr(), .ld(pkt_avail), .en(),
                         .up(), .val(data_in), .cnt(data));
   // crc sender modules
   crc5Sender  crc5s(.clk(clk), .rst(rst), .en(~stall && crc5_en),
@@ -110,8 +110,10 @@ module bitStreamEncoder(
     crc5_in = (state == ADDR) ? addr[addr_cnt] : endp[endp_cnt];
     crc16_in = data[data_cnt];
 
-    // last when on the last bit of crc5, crc16 or pid depending on packet
-    last = (crc5_cnt == 4) || (crc16_cnt == 15) || (pid == PID && pid_cnt == 7);
+    // last signal asserted when on the last bit of crc5, crc16 or pid depending
+    // on packet AND not stalling for bit stuffing
+    last = ~stall && ((crc5_cnt == 4) || (crc16_cnt == 15) ||
+            (pid == PID && pid_cnt == 7));
   end
 
   // FSM: controls stuff, keeps track of state
@@ -173,6 +175,7 @@ endmodule
 // test bit stream encoder
 module bitStreamEncoder_tb;
   logic        clk, rst;
+  logic        pkt_avail;
   logic [7:0]  pid_in;
   logic [6:0]  addr_in;
   logic [3:0]  endp_in;
@@ -208,27 +211,27 @@ module bitStreamEncoder_tb;
                       stall, sent_sync, result, last);
     stall <= 0;
     pid_in <= 8'b1110_0001; addr_in <= 5; endp_in <= 4;
-    sent_sync <= 1;
+    sent_sync <= 1; pkt_avail <= 1;
     $display("SENDING OUT to endpoint 4");
     @(posedge clk);
-    sent_sync <= 0;
+    sent_sync <= 0; pkt_avail <= 0;
     repeat (25) @(posedge clk);
     // test stall
     rst <= 1; @(posedge clk);
     rst <= 0; @(posedge clk);
-    sent_sync <= 1;
+    sent_sync <= 1; pkt_avail <= 1;
     $display("SENDING OUT to endpoint 4 with stall");
     @(posedge clk);
-    sent_sync <= 0;
+    sent_sync <= 0; pkt_avail <= 0;
     repeat (16) @(posedge clk);
     stall <= 1; repeat (5) @(posedge clk);
     stall <= 0; repeat (9) @(posedge clk);
     // test sending DATA
     $display("SENDING DATA = CAFEBABEDEADBEEF");
     pid_in <= 8'b1100_0011; data_in <= 64'hCAFEBABEDEADBEEF;
-    sent_sync <= 1;
+    sent_sync <= 1; pkt_avail <= 1;
     @(posedge clk);
-    sent_sync <= 0;
+    sent_sync <= 0; pkt_avail <= 0;
     repeat (89) @(posedge clk);
     $finish;
   end
