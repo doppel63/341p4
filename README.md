@@ -1,4 +1,13 @@
-341p4
-=====
+The commands to make different projects:
 
-Team Awzum do stuffs here
+prelab:
+  make prelab
+
+your testbench:
+  make / make student
+
+TA testbench:
+  make public
+
+Faulty testbench: (will be released later)
+  make faulty
