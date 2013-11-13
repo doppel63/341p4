@@ -73,6 +73,76 @@ module bitStreamEncoder_tb;
 
 endmodule
 
+// test bse + bitstuffing + nrzi
+module big_tb;
+  logic clk, rst;
+  logic pkt_avail;
+  logic [7:0]  pid_in;
+  logic [6:0]  addr_in;
+  logic [3:0]  endp_in;
+  logic [63:0] data_in;
+  logic        stall;
+  logic        start, last;
+  logic        raw_bit_stream, stuffed_bit_stream, stream_out;
+
+  logic [109:0]  result;   // largest is SYNC + PID + DATA0 + CRC16
+
+  bitStreamEncoder dut0(.*, .bit_out(raw_bit_stream));
+  bitStuffer dut1(.*, .bit_in(raw_bit_stream), .bit_out(stuffed_bit_stream));
+  nrzi dut2(.*, .bit_stream(stuffed_bit_stream));
+
+  initial begin
+    clk = 1;
+    forever #1 clk = ~clk;
+  end
+
+  // used for keeping track of the bit stream
+  // note that result is always 1 clock cycle late!
+  always_ff @(posedge clk, posedge rst) begin
+    if (rst)
+      result <= 0;
+    else begin
+      result <= result << 1;
+      result[0] <= stream_out;
+    end
+  end
+
+  initial begin
+    rst <= 1; @(posedge clk);
+    pid_in <= 0; addr_in <= 0; endp_in <= 0; data_in <= 0; pkt_avail <= 0;
+    rst <= 0; @(posedge clk);
+    // test sending OUT to endpoint 4, data = CAFEBABEDEADBEEF
+    $monitor($time,, "stall = %b, start = %b, last = %b, result = %h",
+                      stall, start, last, result);
+    pid_in <= 8'b1110_0001; addr_in <= 5; endp_in <= 4;
+    pkt_avail <= 1;
+    $display("SENDING OUT to endpoint 4");
+    @(posedge clk);
+    pkt_avail <= 0;
+    repeat (40) @(posedge clk);
+    // test sending DATA
+    rst <= 1; @(posedge clk);
+    rst <= 0; @(posedge clk);
+    $display("SENDING DATA = CAFEBABEDEADBEEF");
+    pid_in <= 8'b1100_0011; data_in <= 64'hCAFEBABEDEADBEEF;
+    pkt_avail <= 1;
+    @(posedge clk);
+    pkt_avail <= 0;
+    repeat (110) @(posedge clk);
+    // test sending ACK
+    rst <= 1; @(posedge clk);
+    rst <= 0; @(posedge clk);
+    $display("SENDING ACK");
+    pid_in <= 8'b1101_0010;
+    pkt_avail <= 1;
+    @(posedge clk);
+    pkt_avail <= 0;
+    repeat (17) @(posedge clk);
+    $finish;
+  end
+
+endmodule
+
 // test bit stuffing
 module bitStuffer_tb;
   logic clk, rst;

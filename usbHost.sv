@@ -1,11 +1,10 @@
 // Write your usb host here.  Do not modify the port list.
-/*
 module usbHost
   (input logic clk, rst_L, 
   usbWires wires);
- */
+ 
   /* Tasks needed to be finished to run testbenches */
-/*
+
   task prelabRequest
   // sends an OUT packet with ADDR=5 and ENDP=4
   // packet should have SYNC and EOP too
@@ -34,12 +33,10 @@ module usbHost
 
 
   // usbHost starts here!!
-  // prelab: we have pid, addr, endp, data (set by task prelabRequest)
 
 
 
 endmodule: usbHost
-*/
 
 // takes a packet and converts it to a bit string when sent_sync is asserted.
 // asserts last when on the last bit of the bit stream.
@@ -567,6 +564,7 @@ module nrzi(
   input     reg       bit_stream,
   input     bit       pkt_avail,
   input     bit       clk, rst,
+  input     bit       last,
   output    reg       stream_out);
 
   reg                   prev_bit;
@@ -589,11 +587,12 @@ module nrzi(
     end
     else begin
       nrzi_state <= next_nrzi_state;
-      prev_bit <= stream_out;
+      prev_bit <= (bit_stream) ? prev_bit : ~prev_bit;
     end
   end
 
   always_comb begin
+    stream_out = prev_bit;
     next_nrzi_state = nrzi_state;
     case (nrzi_state)
       START: begin
@@ -602,16 +601,16 @@ module nrzi(
           next_nrzi_state = START;
         else if (pkt_avail) begin
           next_nrzi_state = RUN;
-          stream_out = (bit_stream) ? prev_bit : ~prev_bit;
+          //stream_out = (bit_stream) ? prev_bit : ~prev_bit;
           //prev_bit = stream_out;
         end
       end
       RUN: begin
-        if (pkt_avail) begin
+        if (last) begin
           next_nrzi_state = START;
           //prev_bit = 1'b1;
         end
-        else if (~pkt_avail) begin
+        else if (~last) begin
           // output         stays the same on 1   changes on 0
           stream_out = (bit_stream) ? prev_bit : ~prev_bit;
           //prev_bit = stream_out;
