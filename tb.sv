@@ -112,3 +112,52 @@ module bitStuffer_tb;
 
 endmodule
 
+module nrzi_tb;
+  logic bit_stream, pkt_avail;
+  logic clk, rst;
+  logic stream_out;
+
+  initial begin
+    clk = 1;
+    forever #5 clk = ~clk;
+  end
+
+  nrzi n1(.*);
+
+  initial begin
+    $monitor($time,, "bit_stream = %b, pkt_avail = %b, stream_out = %b, prev_bit = %b, state %b",
+              bit_stream, pkt_avail, stream_out, n1.prev_bit, n1.nrzi_state);
+    rst <= 1'b1;
+    @(posedge clk);
+    rst <= 1'b0;
+    pkt_avail <= 1'b1;
+    bit_stream <= 1'b1;
+    @(posedge clk);
+    bit_stream <= 1'b0;
+    pkt_avail <= 1'b0;
+    @(posedge clk);
+    @(posedge clk);
+    @(posedge clk);
+    @(posedge clk);
+    @(posedge clk);
+    @(posedge clk);
+    bit_stream <= 1'b1;
+    @(posedge clk);
+    @(posedge clk);
+    @(posedge clk);
+    pkt_avail <= 1'b1;
+    @(posedge clk);
+    pkt_avail <= 1'b0;
+    @(posedge clk);
+    @(posedge clk);
+    @(posedge clk);
+    @(posedge clk);
+    @(posedge clk);
+    @(posedge clk);
+    bit_stream <= 1'b0;
+    @(posedge clk);
+    @(posedge clk);
+    @(posedge clk);
+    $finish;
+  end
+endmodule: nrzi_tb
