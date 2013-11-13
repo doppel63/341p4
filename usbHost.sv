@@ -584,3 +584,77 @@ module crc16Receiver(
 
 endmodule
 
+
+module bitStuffer(
+  input   logic clk, rst,
+  input   logic start,
+  input   logic last,
+  input   logic bit_in,
+  output  logic bit_out,
+  output  logic stall);
+
+  logic       clr;
+  logic [2:0] cnt;
+  enum logic [1:0] {IDLE, COUNTING, STALL} state;
+
+  assign bit_out = (stall) ? 0 : bit_in;
+  assign stall = state == STALL;
+  assign clr = state == IDLE;
+
+  // counter for counting 1's. sounds like a band name
+  counter #(3) onesCnt(.clk(clk), .rst(rst), .clr(stall|clr|~bit_in), .ld(),
+                       .en(bit_in), .up(bit_in), .val(), .cnt(cnt));
+
+  // FSM
+  always_ff @(posedge clk, posedge rst) begin
+    if (rst)
+      state <= IDLE;
+    else begin
+      case (state)
+        IDLE:     state <= (start) ? COUNTING : IDLE;
+        COUNTING: state <= (cnt == 5 && bit_in) ? STALL : COUNTING;
+        STALL:    state <= (last) ? IDLE : COUNTING;
+        default:  state <= state;
+      endcase
+    end
+  end
+
+endmodule
+
+module bitStuffer_tb;
+  logic clk, rst;
+  logic start;
+  logic last;
+  logic bit_in;
+  logic bit_out;
+  logic stall;
+
+  bitStuffer dut(.*);
+
+  initial begin
+    clk = 0;
+    forever #5 clk = ~clk;
+  end
+
+  initial begin
+    $monitor($time,, "bit_in = %b, bit_out = %b, stall = %b",
+                      bit_in, bit_out, stall);
+    rst <= 1; @(posedge clk);
+    rst <= 0;
+    start <= 0; last <= 0;
+    // test some sequence: 011001111111111
+    // should get:         0110011111101111
+    bit_in <= 0;  start <= 1; @(posedge clk);
+    bit_in <= 1;  start <= 0; @(posedge clk);
+    bit_in <= 1; @(posedge clk);
+    bit_in <= 0; @(posedge clk);
+    bit_in <= 0; @(posedge clk);
+    repeat (6) begin bit_in <= 1; @(posedge clk); end
+    @(posedge clk);
+    repeat (3) begin bit_in <= 1; @(posedge clk); end
+    bit_in <= 1;  last <= 1; @(posedge clk);
+    last <= 0; @(posedge clk);
+    $finish;
+  end
+
+endmodule
