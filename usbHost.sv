@@ -69,8 +69,7 @@ module bitStreamEncoder(
   logic [2:0]   crc5_cnt;
   logic [3:0]   crc16_cnt;
 
-  // states for FSM
-  enum logic [2:0] {IDLE, PID, ADDR, ENDP, CRC5, DATA, CRC16} state;
+  enum logic [2:0] {IDLE, PID, ADDR, ENDP, CRC5, DATA, CRC16} FSMstate;
 
   // instantiate stuff in datapath
   // counters = registers for these
@@ -82,7 +81,6 @@ module bitStreamEncoder(
                         .up(), .val(endp_in), .cnt(endp));
   counter #(64) dataReg(.clk(clk), .rst(rst), .clr(), .ld(pkt_avail), .en(),
                         .up(), .val(data_in), .cnt(data));
-  // crc sender modules
   crc5Sender  crc5s(.clk(clk), .rst(rst), .en(~stall && crc5_en),
                       .msg_in(crc5_in), .msg_out(crc5));
   crc16Sender crc16s(.clk(clk), .rst(rst), .en(~stall && crc16_en),
@@ -94,7 +92,7 @@ module bitStreamEncoder(
     bit_out = 'd0; // could be x?
     crc5_en = 0;
     crc16_en = 0;
-    case (state)
+    case (FSMstate)
       PID:              bit_out = pid[pid_cnt];
       ADDR, ENDP, CRC5: begin
                           bit_out = crc5;
@@ -107,7 +105,7 @@ module bitStreamEncoder(
     endcase
 
     // select input to crc5 (addr or endp) and crc16 (data)
-    crc5_in = (state == ADDR) ? addr[addr_cnt] : endp[endp_cnt];
+    crc5_in = (FSMstate == ADDR) ? addr[addr_cnt] : endp[endp_cnt];
     crc16_in = data[data_cnt];
 
     // last signal asserted when on the last bit of crc5, crc16 or pid depending
@@ -119,10 +117,10 @@ module bitStreamEncoder(
   // FSM: controls stuff, keeps track of state
   always_ff @(posedge clk, posedge rst) begin
     if (rst)
-      state <= IDLE;
+      FSMstate <= IDLE;
     else if (~stall) begin
       // only do stuff if no stall signal from bit stuffing
-      case (state)
+      case (FSMstate)
         IDLE:   begin
                   pid_cnt <= 0;
                   addr_cnt <= 0;
@@ -130,49 +128,47 @@ module bitStreamEncoder(
                   data_cnt <= 0;
                   crc5_cnt <= 0;
                   crc16_cnt <= 0;
-                  state <= (sent_sync) ? PID : IDLE;
+                  FSMstate <= (sent_sync) ? PID : IDLE;
                 end
         PID:    begin
                   if (pid_cnt < 7) begin
                     pid_cnt <= pid_cnt + 1;
-                    state <= PID;
+                    FSMstate <= PID;
                   end
                   else begin
                     pid_cnt <= 0;
                     case (pid)
-                      IN, OUT:  state <= ADDR;
-                      DATA0:    state <= DATA;
-                      default:  state <= IDLE;
+                      IN, OUT:  FSMstate <= ADDR;
+                      DATA0:    FSMstate <= DATA;
+                      default:  FSMstate <= IDLE;
                     endcase
                    end
                 end
         ADDR:   begin
                   addr_cnt <= (addr_cnt < 6) ? addr_cnt + 1 : 0;
-                  state <= (addr_cnt < 6) ? ADDR : ENDP;
+                  FSMstate <= (addr_cnt < 6) ? ADDR : ENDP;
                 end
         ENDP:   begin
                   endp_cnt <= (endp_cnt < 3) ? endp_cnt + 1 : 0;
-                  state <= (endp_cnt < 3) ? ENDP : CRC5;
+                  FSMstate <= (endp_cnt < 3) ? ENDP : CRC5;
                 end
         CRC5:   begin
                   crc5_cnt <= (crc5_cnt < 4) ? crc5_cnt + 1 : 0;
-                  state <= (crc5_cnt < 4) ? CRC5 : IDLE;
+                  FSMstate <= (crc5_cnt < 4) ? CRC5 : IDLE;
                 end
         DATA:   begin
                   data_cnt <= (data_cnt < 63) ? data_cnt + 1 : 0;
-                  state <= (data_cnt < 63) ? DATA : CRC16;
+                  FSMstate <= (data_cnt < 63) ? DATA : CRC16;
                 end
         CRC16:  begin
                   crc16_cnt <= (crc16_cnt < 15) ?  crc16_cnt + 1 : 0;
-                  state <= (crc16_cnt < 15) ? CRC16 : IDLE;
+                  FSMstate <= (crc16_cnt < 15) ? CRC16 : IDLE;
                 end
       endcase
     end
   end
-
 endmodule
 
-// test bit stream encoder
 module bitStreamEncoder_tb;
   logic        clk, rst;
   logic        pkt_avail;
@@ -238,7 +234,6 @@ module bitStreamEncoder_tb;
 
 endmodule
 
-// CRC stuff
 // CRC5 calculator: rem 01100
 module crc5Calc(
   input   logic       clk, rst, en, crc_clr, crc_in,
@@ -277,7 +272,6 @@ module crc16Calc(
   end
 
 endmodule
-
 
 // counter: default 4 bits wide
 module counter
@@ -583,4 +577,64 @@ module crc16Receiver(
     #1 $display("msg received! msg: %h, OK = %b", msg, OK);
 
 endmodule
+
+
+module nrzi(
+  input     reg       bit_stream,
+  input     bit       pkt_avail,
+  input     bit       clk, rst,
+  output    reg       stream_out);
+
+  reg                   prev_bit;
+
+  /***
+   * Things to remember:
+   *    - output changes on 0
+   *    - output stays the same on 1
+   *    - first output bit is as if previous bit was a 1
+   *    - all field types are sent except for the EOP
+   */
+
+  enum logic {START, RUN
+              } nrzi_state, next_nrzi_state;
+
+  always_ff @(posedge clk or posedge rst) begin
+    if (rst) begin
+      nrzi_state <= START;
+      prev_bit <= 1'b1;
+    end
+    else begin
+      nrzi_state <= next_nrzi_state;
+      prev_bit <= stream_out;
+    end
+  end
+
+  always_comb begin
+    next_nrzi_state = nrzi_state;
+    case (nrzi_state)
+      START: begin
+        //prev_bit = 1'b1;
+        if (~pkt_avail)
+          next_nrzi_state = START;
+        else if (pkt_avail) begin
+          next_nrzi_state = RUN;
+          stream_out = (bit_stream) ? prev_bit : ~prev_bit;
+          //prev_bit = stream_out;
+        end
+      end
+      RUN: begin
+        if (pkt_avail) begin
+          next_nrzi_state = START;
+          //prev_bit = 1'b1;
+        end
+        else if (~pkt_avail) begin
+          // output         stays the same on 1   changes on 0
+          stream_out = (bit_stream) ? prev_bit : ~prev_bit;
+          //prev_bit = stream_out;
+          next_nrzi_state = RUN;
+        end
+      end
+    endcase
+  end
+endmodule: nrzi
 
