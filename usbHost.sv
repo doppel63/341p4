@@ -50,8 +50,8 @@ module bitStreamEncoder(
   input   logic [6:0]  addr_in,
   input   logic [3:0]  endp_in,
   input   logic [63:0] data_in,
-  input   logic        stall, sent_sync,
-  output  logic        bit_out, last);
+  input   logic        stall,
+  output  logic        bit_out, start, last);
 
   // internal wires
   enum logic [7:0] {OUT = 8'b1110_0001, IN = 8'b0110_1001,
@@ -63,6 +63,7 @@ module bitStreamEncoder(
   logic         crc5_in, crc5, crc16_in, crc16;
   // internal control points; also wires anyway
   logic         crc5_en, crc16_en;
+  logic [2:0]   sync_cnt;
   logic [1:0]   endp_cnt;
   logic [2:0]   pid_cnt, addr_cnt;
   logic [5:0]   data_cnt;
@@ -70,10 +71,10 @@ module bitStreamEncoder(
   logic [3:0]   crc16_cnt;
 
   // states for FSM
-  enum logic [2:0] {IDLE, PID, ADDR, ENDP, CRC5, DATA, CRC16} state;
+  enum logic [2:0] {IDLE, SYNC, PID, ADDR, ENDP, CRC5, DATA, CRC16} state;
 
   // instantiate stuff in datapath
-  // counters = registers for these
+  // use counters as registers for holding stuff
   counter #(8)  pidReg(.clk(clk), .rst(rst), .clr(), .ld(pkt_avail), .en(),
                        .up(), .val(pid_in), .cnt(pid));
   counter #(7)  addrReg(.clk(clk), .rst(rst), .clr(), .ld(pkt_avail), .en(),
@@ -95,6 +96,7 @@ module bitStreamEncoder(
     crc5_en = 0;
     crc16_en = 0;
     case (state)
+      SYNC:             bit_out = sync_cnt == 7;
       PID:              bit_out = pid[pid_cnt];
       ADDR, ENDP, CRC5: begin
                           bit_out = crc5;
@@ -109,7 +111,8 @@ module bitStreamEncoder(
     // select input to crc5 (addr or endp) and crc16 (data)
     crc5_in = (state == ADDR) ? addr[addr_cnt] : endp[endp_cnt];
     crc16_in = data[data_cnt];
-
+    // tell bit stuffer to start checking for 1's on the last bit of PID
+    start = pid_cnt == 7;
     // last signal asserted when on the last bit of crc5, crc16 or pid depending
     // on packet AND not stalling for bit stuffing
     last = ~stall && ((crc5_cnt == 4) || (crc16_cnt == 15) ||
@@ -124,13 +127,18 @@ module bitStreamEncoder(
       // only do stuff if no stall signal from bit stuffing
       case (state)
         IDLE:   begin
+                  sync_cnt <= 0;
                   pid_cnt <= 0;
                   addr_cnt <= 0;
                   endp_cnt <= 0;
                   data_cnt <= 0;
                   crc5_cnt <= 0;
                   crc16_cnt <= 0;
-                  state <= (sent_sync) ? PID : IDLE;
+                  state <= (pkt_avail) ? SYNC : IDLE;
+                end
+        SYNC:   begin
+                  sync_cnt <= sync_cnt + 1;
+                  state <= (sync_cnt == 7) ? PID : SYNC;
                 end
         PID:    begin
                   if (pid_cnt < 7) begin
@@ -163,7 +171,7 @@ module bitStreamEncoder(
                   state <= (data_cnt < 63) ? DATA : CRC16;
                 end
         CRC16:  begin
-                  crc16_cnt <= (crc16_cnt < 15) ?  crc16_cnt + 1 : 0;
+                  crc16_cnt <= (crc16_cnt < 15) ? crc16_cnt + 1 : 0;
                   state <= (crc16_cnt < 15) ? CRC16 : IDLE;
                 end
       endcase
@@ -180,10 +188,10 @@ module bitStreamEncoder_tb;
   logic [6:0]  addr_in;
   logic [3:0]  endp_in;
   logic [63:0] data_in;
-  logic        stall, sent_sync;
-  logic        bit_out, last;
+  logic        stall;
+  logic        bit_out, start, last;
 
-  logic [87:0]  result;   // largest is PID + DATA0 + CRC16
+  logic [95:0]  result;   // largest is SYNC + PID + DATA0 + CRC16
 
   bitStreamEncoder dut(.*);
 
@@ -207,32 +215,32 @@ module bitStreamEncoder_tb;
     rst <= 1; @(posedge clk);
     rst <= 0; @(posedge clk);
     // test sending OUT to endpoint 4, data = CAFEBABEDEADBEEF
-    $monitor($time,, "stall = %b, sent_sync = %b, result = %h, last = %b",
-                      stall, sent_sync, result, last);
+    $monitor($time,, "stall = %b, start = %b, last = %b, result = %h",
+                      stall, start, last, result);
     stall <= 0;
     pid_in <= 8'b1110_0001; addr_in <= 5; endp_in <= 4;
-    sent_sync <= 1; pkt_avail <= 1;
+    pkt_avail <= 1;
     $display("SENDING OUT to endpoint 4");
     @(posedge clk);
-    sent_sync <= 0; pkt_avail <= 0;
-    repeat (25) @(posedge clk);
+    pkt_avail <= 0;
+    repeat (33) @(posedge clk);
     // test stall
     rst <= 1; @(posedge clk);
     rst <= 0; @(posedge clk);
-    sent_sync <= 1; pkt_avail <= 1;
+    pkt_avail <= 1;
     $display("SENDING OUT to endpoint 4 with stall");
     @(posedge clk);
-    sent_sync <= 0; pkt_avail <= 0;
-    repeat (16) @(posedge clk);
+    pkt_avail <= 0;
+    repeat (24) @(posedge clk);
     stall <= 1; repeat (5) @(posedge clk);
     stall <= 0; repeat (9) @(posedge clk);
     // test sending DATA
     $display("SENDING DATA = CAFEBABEDEADBEEF");
     pid_in <= 8'b1100_0011; data_in <= 64'hCAFEBABEDEADBEEF;
-    sent_sync <= 1; pkt_avail <= 1;
+    pkt_avail <= 1;
     @(posedge clk);
-    sent_sync <= 0; pkt_avail <= 0;
-    repeat (89) @(posedge clk);
+    pkt_avail <= 0;
+    repeat (97) @(posedge clk);
     $finish;
   end
 
