@@ -3,13 +3,13 @@ module usbHost
   (input logic clk, rst_L, 
   usbWires wires);
 
-  logic pkt_avail, stall;
-  logic start, last;
-  logic raw_bit_stream, stuffed_bit_stream, stream_out;
-  logic [7:0] pid_in;
-  logic [6:0] addr_in;
-  logic [3:0] endp_in;
-  logic [63:0] data_in;
+  bit pkt_avail, stall;
+  bit start, last;
+  bit raw_bit_stream, stuffed_bit_stream, stream_out;
+  bit [7:0] pid_in;
+  bit [6:0] addr_in;
+  bit [3:0] endp_in;
+  bit [63:0] data_in;
 
   bitStreamEncoder bse1(.*, .bit_out(raw_bit_stream));
   bitStuffer bs1(.*, .bit_in(raw_bit_stream), .bit_out(stuffed_bit_stream));
@@ -54,33 +54,33 @@ endmodule: usbHost
 // asserts last when on the last bit of the bit stream.
 module bitStreamEncoder(
   input   logic        clk, rst_L,
-  input   logic        pkt_avail,
-  input   logic [7:0]  pid_in,
-  input   logic [6:0]  addr_in,
-  input   logic [3:0]  endp_in,
-  input   logic [63:0] data_in,
-  input   logic        stall,
-  output  logic        bit_out, start, last);
+  input   bit        pkt_avail,
+  input   bit [7:0]  pid_in,
+  input   bit [6:0]  addr_in,
+  input   bit [3:0]  endp_in,
+  input   bit [63:0] data_in,
+  input   bit        stall,
+  output  bit        bit_out, start, last);
 
   // internal wires
-  enum logic [7:0] {OUT = 8'b1110_0001, IN = 8'b0110_1001,
+  enum bit [7:0] {OUT = 8'b1110_0001, IN = 8'b0110_1001,
                     DATA0 = 8'b1100_0011,
                     ACK = 8'b1101_0010, NAK = 8'b0101_1010} pid;
-  logic [6:0]   addr;
-  logic [3:0]   endp;
-  logic [63:0]  data;
-  logic         crc5_in, crc5, crc16_in, crc16;
+  bit [6:0]   addr;
+  bit [3:0]   endp;
+  bit [63:0]  data;
+  bit         crc5_in, crc5, crc16_in, crc16;
   // internal control points; also wires anyway
-  logic         crc5_en, crc16_en;
-  logic [2:0]   sync_cnt;
-  logic [1:0]   endp_cnt;
-  logic [2:0]   pid_cnt, addr_cnt;
-  logic [5:0]   data_cnt;
-  logic [2:0]   crc5_cnt;
-  logic [3:0]   crc16_cnt;
+  bit         crc5_en, crc16_en;
+  bit [2:0]   sync_cnt;
+  bit [1:0]   endp_cnt;
+  bit [2:0]   pid_cnt, addr_cnt;
+  bit [5:0]   data_cnt;
+  bit [2:0]   crc5_cnt;
+  bit [3:0]   crc16_cnt;
 
   // states for FSM
-  enum logic [2:0] {IDLE, SYNC, PID, ADDR, ENDP, CRC5, DATA, CRC16} state;
+  enum bit [2:0] {IDLE, SYNC, PID, ADDR, ENDP, CRC5, DATA, CRC16} state;
 
   // instantiate stuff in datapath
   // use counters as registers for holding stuff
@@ -193,8 +193,9 @@ endmodule
 // CRC stuff
 // CRC5 calculator: rem 01100
 module crc5Calc(
-  input   logic       clk, rst_L, en, crc_clr, crc_in,
-  output  logic [4:0] crc_out);
+  input   logic clk, rst_L,
+  input   bit   en, crc_clr, crc_in,
+  output  bit [4:0] crc_out);
 
   always_ff @(posedge clk, negedge rst_L) begin
     if (~rst_L)
@@ -212,8 +213,9 @@ endmodule
 
 // CRC16 calculator: rem 800d
 module crc16Calc(
-  input   logic         clk, rst_L, en, crc_clr, crc_in,
-  output  logic [15:0]  crc_out);
+  input   logic         clk, rst_L,
+  input   bit         en, crc_clr, crc_in,
+  output  bit [15:0]  crc_out);
 
   always_ff @(posedge clk, negedge rst_L) begin
     if (~rst_L)
@@ -234,9 +236,10 @@ endmodule
 // counter: default 4 bits wide
 module counter
   #(parameter WIDTH = 4)
-  (input  logic             clk, rst_L, clr, ld, en, up,
-  input   logic [WIDTH-1:0] val,
-  output  logic [WIDTH-1:0] cnt);
+  (input  logic             clk, rst_L,
+  input   bit             clr, ld, en, up,
+  input   bit [WIDTH-1:0] val,
+  output  bit [WIDTH-1:0] cnt);
 
   always_ff @(posedge clk, negedge rst_L) begin
     if (~rst_L)
@@ -256,8 +259,9 @@ endmodule
 // shift reg: default 11 bits wide
 module shiftReg
   #(parameter WIDTH = 11)
-  (input  logic             clk, rst_L, clr, en, in,
-  output  logic [WIDTH-1:0] out);
+  (input  logic             clk, rst_L,
+  input   bit             clr, en, in,
+  output  bit [WIDTH-1:0] out);
 
   always_ff @(posedge clk, negedge rst_L) begin
     if (~rst_L)
@@ -273,18 +277,19 @@ endmodule
 
 // CRC5 sender
 module crc5Sender(
-  input   logic clk, rst_L, en, msg_in,
-  output  logic msg_out);
+  input   logic clk, rst_L,
+  input   bit en, msg_in,
+  output  bit msg_out);
 
-  logic crc_in;
-  logic [4:0] crc_out, com_rem;
-  logic crc_clr;
-  logic cnt_clr, cnt_en, cnt_up;
-  logic rem_ld, rem_en, rem_up;
-  logic [3:0] cnt, rem_cnt;
+  bit crc_in;
+  bit [4:0] crc_out, com_rem;
+  bit crc_clr;
+  bit cnt_clr, cnt_en, cnt_up;
+  bit rem_ld, rem_en, rem_up;
+  bit [3:0] cnt, rem_cnt;
 
-  logic body, firstRem, rem_bit;
-  enum logic [1:0] {BODY, REM, DONE} cs, ns;
+  bit body, firstRem, rem_bit;
+  enum bit [1:0] {BODY, REM, DONE} cs, ns;
 
   // instantiate stuff
   crc5Calc calc(.*);
@@ -343,19 +348,20 @@ endmodule
 
 // CRC16 sender
 module crc16Sender(
-  input   logic clk, rst_L, en, msg_in,
-  output  logic msg_out);
+  input   logic clk, rst_L,
+  input   bit en, msg_in,
+  output  bit msg_out);
 
-  logic crc_in;
-  logic [15:0]  crc_out, com_rem;
-  logic crc_clr;
-  logic cnt_clr, cnt_en, cnt_up;
-  logic rem_ld, rem_en, rem_up;
-  logic [6:0] cnt;
-  logic [3:0] rem_cnt;
+  bit crc_in;
+  bit [15:0]  crc_out, com_rem;
+  bit crc_clr;
+  bit cnt_clr, cnt_en, cnt_up;
+  bit rem_ld, rem_en, rem_up;
+  bit [6:0] cnt;
+  bit [3:0] rem_cnt;
 
-  logic body, firstRem, rem_bit;
-  enum logic [1:0] {BODY, REM, DONE} cs, ns;
+  bit body, firstRem, rem_bit;
+  enum bit [1:0] {BODY, REM, DONE} cs, ns;
 
   // instantiate stuff
   crc16Calc calc(.*);
@@ -414,16 +420,17 @@ endmodule
 
 // CRC5 receiver
 module crc5Receiver(
-  input   logic         clk, rst_L, en, msg_in,
-  output  logic         done, OK,
-  output  logic [10:0]  msg);
+  input   logic         clk, rst_L,
+  input   bit         en, msg_in,
+  output  bit         done, OK,
+  output  bit [10:0]  msg);
 
-  logic [4:0] crc_out;
-  logic       rcv_en;
-  logic       crc_clr;
-  logic       cnt_clr, cnt_en, cnt_up;
-  logic [3:0] cnt;
-  enum logic [1:0] {BODY, REM, DONE} cs, ns;
+  bit [4:0] crc_out;
+  bit       rcv_en;
+  bit       crc_clr;
+  bit       cnt_clr, cnt_en, cnt_up;
+  bit [3:0] cnt;
+  enum bit [1:0] {BODY, REM, DONE} cs, ns;
 
   // instantiate stuff
   crc5Calc calc(clk, rst_L, en, crc_clr, msg_in, crc_out);
@@ -476,16 +483,17 @@ endmodule
 
 // CRC16 receiver
 module crc16Receiver(
-  input   logic         clk, rst_L, en, msg_in,
-  output  logic         done, OK,
-  output  logic [63:0]  msg);
+  input   logic         clk, rst_L,
+  input   bit         en, msg_in,
+  output  bit         done, OK,
+  output  bit [63:0]  msg);
 
-  logic [15:0]  crc_out;
-  logic       rcv_en;
-  logic       crc_clr;
-  logic       cnt_clr, cnt_en, cnt_up;
-  logic [6:0] cnt;
-  enum logic [1:0] {BODY, REM, DONE} cs, ns;
+  bit [15:0]  crc_out;
+  bit       rcv_en;
+  bit       crc_clr;
+  bit       cnt_clr, cnt_en, cnt_up;
+  bit [6:0] cnt;
+  enum bit [1:0] {BODY, REM, DONE} cs, ns;
 
   // instantiate stuff
   crc16Calc calc(clk, rst_L, en, crc_clr, msg_in, crc_out);
@@ -539,16 +547,16 @@ endmodule
 // for stuffing bits.
 module bitStuffer(
   input   logic clk, rst_L,
-  input   logic pkt_avail,
-  input   logic start,
-  input   logic last,
-  input   logic bit_in,
-  output  logic bit_out,
-  output  logic stall);
+  input   bit pkt_avail,
+  input   bit start,
+  input   bit last,
+  input   bit bit_in,
+  output  bit bit_out,
+  output  bit stall);
 
-  logic       clr;
-  logic [2:0] cnt;
-  enum logic [1:0] {IDLE, COUNTING, STALL} state;
+  bit       clr;
+  bit [2:0] cnt;
+  enum bit [1:0] {IDLE, COUNTING, STALL} state;
 
   assign bit_out = (stall) ? 0 : bit_in;
   assign stall = state == STALL;
@@ -636,10 +644,10 @@ endmodule: nrzi
 // nrzi
 module nrzi(
   input   logic clk, rst_L,
-  input   logic bit_in,
-  output  logic bit_out);
+  input   bit bit_in,
+  output  bit bit_out);
 
-  logic prev_bit;
+  bit prev_bit;
 
   always_ff @(posedge clk, negedge rst_L) begin
     if (~rst_L)
@@ -664,7 +672,7 @@ task SE0(usbWires wires);
   wires.DP = 1'b0;
 entask
 
-task EOP(input logic clk, usbWires wires);
+task EOP(input bit clk, usbWires wires);
   SE0(wires);
   @(posedge clk);
   SEO(wires);
@@ -688,11 +696,11 @@ interface usbWires;
 endinterface
 */
 module dpdm(
-  input logic stream_out, pkt_avail, last,
+  input bit stream_out, pkt_avail, last,
   input logic clk, rst_L,
   usbWires wires);
   // ummm you put these wires here right?
-  logic dp, dm, en, en_dp, en_dm;
+  bit dp, dm, en, en_dp, en_dm;
 
   assign wires.DP = (en) ? en_dp : 1'bz;
   assign wires.DM = (en) ? en_dm : 1'bz;
@@ -702,7 +710,7 @@ module dpdm(
   
   // note to self: tri0 net pull down when not driven
 
-  enum logic [2:0] {IDLE, PACKET, EOP1, EOP2, EOP3
+  enum bit [2:0] {IDLE, PACKET, EOP1, EOP2, EOP3
                   } DPDM_state, next_DPDM_state;
 
   always_ff @(posedge clk or negedge rst_L) begin
