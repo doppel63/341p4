@@ -1,6 +1,6 @@
 // test bit stream encoder
 module bitStreamEncoder_tb;
-  logic        clk, rst;
+  logic        clk, rst_L;
   logic        pkt_avail;
   logic [7:0]  pid_in;
   logic [6:0]  addr_in;
@@ -16,8 +16,8 @@ module bitStreamEncoder_tb;
 
   // used for keeping track of the bit stream
   // note that result is always 1 clock cycle late!
-  always_ff @(posedge clk, posedge rst) begin
-    if (rst)
+  always_ff @(posedge clk, posedge rst_L) begin
+    if (~rst_L)
       result <= 0;
     else if (~stall) begin
       result <= result << 1;
@@ -26,8 +26,8 @@ module bitStreamEncoder_tb;
   end
 
   initial begin
-    rst <= 1; @(posedge clk);
-    rst <= 0; @(posedge clk);
+    rst_L <= 0; @(posedge clk);
+    rst_L <= 1; @(posedge clk);
     // test sending OUT to endpoint 4, data = CAFEBABEDEADBEEF
     $monitor($time,, "stall = %b, start = %b, last = %b, result = %h",
                       stall, start, last, result);
@@ -39,8 +39,8 @@ module bitStreamEncoder_tb;
     pkt_avail <= 0;
     repeat (33) @(posedge clk);
     // test stall
-    rst <= 1; @(posedge clk);
-    rst <= 0; @(posedge clk);
+    rst_L <= 0; @(posedge clk);
+    rst_L <= 1; @(posedge clk);
     pkt_avail <= 1;
     $display("SENDING OUT to endpoint 4 with stall");
     @(posedge clk);
@@ -56,8 +56,8 @@ module bitStreamEncoder_tb;
     pkt_avail <= 0;
     repeat (97) @(posedge clk);
     // test sending ACK
-    rst <= 1; @(posedge clk);
-    rst <= 0; @(posedge clk);
+    rst_L <= 0; @(posedge clk);
+    rst_L <= 1; @(posedge clk);
     $display("SENDING ACK");
     pid_in <= 8'b1101_0010;
     pkt_avail <= 1;
@@ -71,7 +71,7 @@ endmodule
 
 // test bse + bitstuffing + nrzi
 module big_tb;
-  logic clk, rst;
+  logic clk, rst_L;
   logic pkt_avail;
   logic [7:0]  pid_in;
   logic [6:0]  addr_in;
@@ -93,8 +93,8 @@ module big_tb;
 
   // used for keeping track of the bit stream
   // note that result is always 1 clock cycle late!
-  always_ff @(posedge clk, posedge rst) begin
-    if (rst)
+  always_ff @(posedge clk, negedge rst_L) begin
+    if (~rst_L)
       result <= 0;
     else begin
       result <= result << 1;
@@ -103,9 +103,9 @@ module big_tb;
   end
 
   initial begin
-    rst <= 1; @(posedge clk);
+    rst_L <= 0; @(posedge clk);
     pid_in <= 0; addr_in <= 0; endp_in <= 0; data_in <= 0; pkt_avail <= 0;
-    rst <= 0; @(posedge clk);
+    rst_L <= 1; @(posedge clk);
     // test sending OUT to endpoint 4, data = CAFEBABEDEADBEEF
     $monitor($time,, "stall = %b, start = %b, last = %b, result = %h",
                       stall, start, last, result);
@@ -136,7 +136,7 @@ endmodule
 
 // test bit stuffing
 module bitStuffer_tb;
-  logic clk, rst;
+  logic clk, rst_L;
   logic pkt_avail;
   logic start;
   logic last;
@@ -150,8 +150,8 @@ module bitStuffer_tb;
   initial begin
     $monitor($time,, "bit_in = %b, bit_out = %b, stall = %b",
                       bit_in, bit_out, stall);
-    rst <= 1; @(posedge clk);
-    rst <= 0;
+    rst_L <= 0; @(posedge clk);
+    rst_L <= 1;
     start <= 0; last <= 0;
     // test some sequence: 011001111111111
     // should get:         0110011111101111
@@ -172,18 +172,18 @@ endmodule
 
 module nrzi_tb;
   logic bit_stream, pkt_avail, last;
-  logic clk, rst;
+  logic clk, rst_L;
   logic stream_out;
 
   nrzi n1(.*);
   clock c1(.*);
 
   initial begin
-    $monitor($time,, "bit_stream = %b, pkt_avail = %b, stream_out = %b, prev_bit = %b, state %b",
-              bit_stream, pkt_avail, stream_out, n1.prev_bit, n1.nrzi_state);
-    rst <= 1'b1;
+    $monitor($time,, "bit_stream = %b, pkt_avail = %b, stream_out = %b, prev_bit = %b",
+              bit_stream, pkt_avail, stream_out, n1.prev_bit);
+    rst_L <= 1'b0;
     @(posedge clk);
-    rst <= 1'b0;
+    rst_L <= 1'b1;
     pkt_avail <= 1'b1;
     bit_stream <= 1'b1;
     @(posedge clk);
@@ -204,7 +204,7 @@ endmodule: nrzi_tb
 
 module dpdm_tb;
   logic stream_out, pkt_avail, last;
-  logic clk, rst;
+  logic clk, rst_L;
   usbWires wires();
 
   dpdm dpdm1(.*);
@@ -212,12 +212,12 @@ module dpdm_tb;
 
   initial begin
     $monitor($time,, "s_out = %b, pkt_avail = %b, en = %b, last = %b, \
-rst = %b, dm = %b, dp = %b, state = %s", stream_out, pkt_avail, dpdm1.en, 
-      last, rst, wires.DM, wires.DP, dpdm1.DPDM_state);
+rst_L = %b, dm = %b, dp = %b, state = %s", stream_out, pkt_avail, dpdm1.en, 
+      last, rst_L, wires.DM, wires.DP, dpdm1.DPDM_state);
     @(posedge clk);
-    rst <= 1'b1;
+    rst_L <= 1'b0;
     @(posedge clk);
-    rst <= 1'b0;
+    rst_L <= 1'b1;
     pkt_avail <= 1'b1;
     last <= 0;
     @(posedge clk);
