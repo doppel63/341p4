@@ -4,7 +4,7 @@ module usbHost
   (input logic clk, rst_L, 
   usbWires wires);
 
-  assign wires.DP =  
+  bitStreamEncoder bse1(.*);
  
   // Tasks needed to be finished to run testbenches
 
@@ -34,7 +34,6 @@ module usbHost
   endtask: writeData
 endmodule: usbHost
   */
-
 
 // takes a packet and converts it to a bit string when sent_sync is asserted.
 // asserts last when on the last bit of the bit stream.
@@ -104,8 +103,6 @@ module bitStreamEncoder(
     endcase
 
     // select input to crc5 (addr or endp) and crc16 (data)
-    crc5_in = (state == ADDR) ? addr[addr_cnt] : endp[endp_cnt];
-    crc16_in = data[data_cnt];
     // tell bit stuffer to start checking for 1's on the last bit of PID
     start = pid_cnt == 7;
     // last signal asserted when on the last bit of crc5, crc16 or pid depending
@@ -659,6 +656,7 @@ module dpdm(
 
   assign wires.DP = (en) ? en_dp : 1'bz;
   assign wires.DM = (en) ? en_dm : 1'bz;
+  //assign dp = wires.DP;
   assign dp = wires.DP;
   assign dm = wires.DM;
   
@@ -667,7 +665,7 @@ module dpdm(
   enum logic [2:0] {IDLE, PACKET, EOP1, EOP2, EOP3
                   } DPDM_state, next_DPDM_state;
 
-  always_ff @(posedge clk) begin
+  always_ff @(posedge clk or posedge rst) begin
     if (rst)
       DPDM_state <= IDLE;
     else if (~rst)
@@ -676,9 +674,12 @@ module dpdm(
 
   always_comb begin
     next_DPDM_state = DPDM_state;
-    en = 1'b1;
+    en = 1'b0;
+    en_dp = 0;
+    en_dm = 0;
     case (DPDM_state)
       IDLE:   begin
+        $display("JKFSLE");
         if (pkt_avail) begin
           next_DPDM_state = PACKET;
         end
@@ -686,6 +687,7 @@ module dpdm(
           next_DPDM_state = IDLE;
       end
       PACKET: begin
+        en = 1'b1;
         if (stream_out) begin
           en_dp = 1'b1;
           en_dm = 1'b0;

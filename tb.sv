@@ -82,13 +82,14 @@ module big_tb;
   logic        raw_bit_stream, stuffed_bit_stream, stream_out;
   usbWires wires();
 
+
   logic [109:0]  result;   // largest is SYNC + PID + DATA0 + CRC16
 
   bitStreamEncoder dut0(.*, .bit_out(raw_bit_stream));
   bitStuffer dut1(.*, .bit_in(raw_bit_stream), .bit_out(stuffed_bit_stream));
   nrzi dut2(.*, .bit_stream(stuffed_bit_stream));
+  dpdm d1(.*);
   clock c1(.*);
-  dpdm(.*);
 
   // used for keeping track of the bit stream
   // note that result is always 1 clock cycle late!
@@ -204,6 +205,46 @@ module nrzi_tb;
   end
 endmodule: nrzi_tb
 
+module dpdm_tb;
+  logic stream_out, pkt_avail, last;
+  logic clk, rst;
+  usbWires wires();
+
+  dpdm dpdm1(.*);
+  clock(.*);
+
+  initial begin
+    $monitor($time,, "s_out = %b, pkt_avail = %b, en = %b, last = %b, \
+rst = %b, dm = %b, dp = %b, state = %s", stream_out, pkt_avail, dpdm1.en, 
+      last, rst, dpdm1.dm, dpdm1.dp, dpdm1.DPDM_state);
+    @(posedge clk);
+    rst <= 1'b1;
+    @(posedge clk);
+    rst <= 1'b0;
+    pkt_avail <= 1'b1;
+    last <= 0;
+    @(posedge clk);
+    pkt_avail <= 0;
+    repeat (5) begin
+      stream_out <= 0;
+      @(posedge clk);
+      stream_out <= 1;
+      @(posedge clk);
+    end
+    @(posedge clk);
+    @(posedge clk);
+    @(posedge clk);
+    @(posedge clk);
+    @(posedge clk);
+    last <= 1;
+    @(posedge clk);
+    @(posedge clk);
+    @(posedge clk);
+    @(posedge clk);
+    @(posedge clk);
+    $finish;
+  end
+endmodule
 
 module clock(
   output logic clk);
