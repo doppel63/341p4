@@ -1,4 +1,6 @@
 /* Write your usb host here.  Do not modify the port list. */
+// Xiang Lin, xianglin
+// Doci Mou, dmou
 module usbHost
   (input logic clk, rst_L, 
   usbWires wires);
