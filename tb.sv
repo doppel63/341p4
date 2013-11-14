@@ -83,7 +83,7 @@ module big_tb;
 
   bitStreamEncoder dut0(.*, .bit_out(raw_bit_stream));
   bitStuffer dut1(.*, .bit_in(raw_bit_stream), .bit_out(stuffed_bit_stream));
-  nrzi dut2(.*, .bit_in(stuffed_bit_stream), .bit_out(stream_out));
+  nrzi dut2(.*, .bit_stream(stuffed_bit_stream));
   dpdm d1(.*);
   clock c1(.*);
 

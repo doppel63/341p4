@@ -13,7 +13,7 @@ module usbHost
 
   bitStreamEncoder bse1(.*, .bit_out(raw_bit_stream));
   bitStuffer bs1(.*, .bit_in(raw_bit_stream), .bit_out(stuffed_bit_stream));
-  nrzi n1(.*, .bit_in(stuffed_bit_stream), .bit_out(stream_out));
+  nrzi n1(.*, .bit_stream(stuffed_bit_stream), .stream_out(stream_out));
   dpdm d1(.*);
   
   // Tasks needed to be finished to run testbenches
@@ -583,7 +583,7 @@ module bitStuffer(
   end
 
 endmodule
-/*
+
 module nrzi(
   input     reg       bit_stream,
   input     bit       pkt_avail,
@@ -592,7 +592,7 @@ module nrzi(
   output    reg       stream_out);
 
   reg                   prev_bit;
-*/
+
   /***
    * Things to remember:
    *    - output changes on 0
@@ -600,18 +600,19 @@ module nrzi(
    *    - first output bit is as if previous bit was a 1
    *    - all field types are sent except for the EOP
    */
-/*
+
   enum logic {START, RUN
               } nrzi_state, next_nrzi_state;
 
   always_ff @(posedge clk or negedge rst_L) begin
     if (~rst_L) begin
       nrzi_state <= START;
-      prev_bit <= 1'b1;
+      prev_bit <= 1;
     end
     else begin
       nrzi_state <= next_nrzi_state;
-      prev_bit <= (bit_stream) ? prev_bit : ~prev_bit;
+      prev_bit <= ((nrzi_state == RUN && bit_stream) || pkt_avail) ?
+                  prev_bit : ~prev_bit;
     end
   end
 
@@ -624,7 +625,7 @@ module nrzi(
           next_nrzi_state = START;
         else if (pkt_avail) begin
           next_nrzi_state = RUN;
-          //stream_out = (bit_stream) ? prev_bit : ~prev_bit;
+          stream_out = (bit_stream) ? prev_bit : ~prev_bit;
         end
       end
       RUN: begin
@@ -640,7 +641,7 @@ module nrzi(
     endcase
   end
 endmodule: nrzi
-*/
+/*
 // nrzi
 module nrzi(
   input   logic clk, rst_L,
@@ -659,7 +660,7 @@ module nrzi(
   assign bit_out = (bit_in) ? prev_bit : ~prev_bit;
 
 endmodule
-  
+ */ 
 /*
 
 task K(usbWires wires);
