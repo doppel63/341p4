@@ -1,22 +1,19 @@
-/* Write your usb host here.  Do not modify the port list.
+/* Write your usb host here.  Do not modify the port list. */
 module usbHost
   (input logic clk, rst_L, 
   usbWires wires);
 
   logic pkt_avail, stall;
-  logic bit_out, start, last;
+  logic start, last;
+  logic raw_bit_stream, stuffed_bit_stream, stream_out;
   logic [7:0] pid_in;
   logic [6:0] addr_in;
   logic [3:0] endp_in;
   logic [63:0] data_in;
 
-  bitStreamEncoder bse1(.*);
-  crc5Sender c5s1(.*);
-  crc16Sender c16s1(.*);
-  crc5Receiver c5r1(.*);
-  crc16Receiver c16r1(.*);
-  bitStuffer bs1(.*);
-  nrzi n1(.*);
+  bitStreamEncoder bse1(.*, .bit_out(raw_bit_stream));
+  bitStuffer bs1(.*, .bit_in(raw_bit_stream), .bit_out(stuffed_bit_stream));
+  nrzi n1(.*, .bit_in(stuffed_bit_stream), .bit_out(stream_out));
   dpdm d1(.*);
   
   // Tasks needed to be finished to run testbenches
@@ -26,14 +23,12 @@ module usbHost
   // packet should have SYNC and EOP too
   (input bit  [7:0] data);
 
-  logic [6:0] addr;
-  logic [3:0] endp;
-  logic [7:0] pid;
+  pid_in <= 8'b1110_0001; addr_in <= 5; endp_in <= 4;
+  pkt_avail <= 1;
+  @(posedge clk);
+  pkt_avail <= 0;
+  repeat (40) @(posedge clk);
 
-  assign addr = 7'd5;
-  assign endp = 4'd4;
-  assign pid = 8'b01111000;
-    
   endtask: prelabRequest
 
   task readData
@@ -53,7 +48,7 @@ module usbHost
    output bit        success);
 
   endtask: writeData
-endmodule: usbHost*/
+endmodule: usbHost
 
 // takes a packet and converts it to a bit string when sent_sync is asserted.
 // asserts last when on the last bit of the bit stream.
@@ -123,6 +118,8 @@ module bitStreamEncoder(
     endcase
 
     // select input to crc5 (addr or endp) and crc16 (data)
+    crc5_in = (state == ADDR) ? addr[addr_cnt] : endp[endp_cnt];
+    crc16_in = data[data_cnt];
     // tell bit stuffer to start checking for 1's on the last bit of PID
     start = pid_cnt == 7;
     // last signal asserted when on the last bit of crc5, crc16 or pid depending
@@ -578,7 +575,7 @@ module bitStuffer(
   end
 
 endmodule
-
+/*
 module nrzi(
   input     reg       bit_stream,
   input     bit       pkt_avail,
@@ -587,7 +584,7 @@ module nrzi(
   output    reg       stream_out);
 
   reg                   prev_bit;
-
+*/
   /***
    * Things to remember:
    *    - output changes on 0
@@ -595,7 +592,7 @@ module nrzi(
    *    - first output bit is as if previous bit was a 1
    *    - all field types are sent except for the EOP
    */
-
+/*
   enum logic {START, RUN
               } nrzi_state, next_nrzi_state;
 
@@ -635,6 +632,25 @@ module nrzi(
     endcase
   end
 endmodule: nrzi
+*/
+// nrzi
+module nrzi(
+  input   logic clk, rst_L,
+  input   logic bit_in,
+  output  logic bit_out);
+
+  logic prev_bit;
+
+  always_ff @(posedge clk, negedge rst_L) begin
+    if (~rst_L)
+      prev_bit <= 1'b1;
+    else
+      prev_bit <= bit_out;
+  end
+
+  assign bit_out = (bit_in) ? prev_bit : ~prev_bit;
+
+endmodule
   
 /*
 
@@ -665,12 +681,12 @@ task SYNC(input logic clk, usbWires wires);
   J(wires);
   @(posedge clk);
 endtask
-*/
+
 interface usbWires;
   tri0 DP;
   tri0 DM;
 endinterface
-
+*/
 module dpdm(
   input logic stream_out, pkt_avail, last,
   input logic clk, rst_L,
@@ -726,18 +742,21 @@ module dpdm(
           next_DPDM_state = PACKET;
       end
       EOP1:   begin
+        en = 1'b1;
         en_dp = 1'b0;
         en_dm = 1'b0;
         next_DPDM_state = EOP2;
       end
       EOP2:   begin
+        en = 1'b1;
         en_dp = 1'b0;
         en_dm = 1'b0;
         next_DPDM_state = EOP3;
       end
       EOP3:   begin
-        en_dp = 1'b0;
-        en_dm = 1'b1;
+        en = 1'b1;
+        en_dp = 1'b1;
+        en_dm = 1'b0;
         next_DPDM_state = IDLE;
       end
     endcase

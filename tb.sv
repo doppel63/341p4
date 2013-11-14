@@ -16,7 +16,7 @@ module bitStreamEncoder_tb;
 
   // used for keeping track of the bit stream
   // note that result is always 1 clock cycle late!
-  always_ff @(posedge clk, posedge rst_L) begin
+  always_ff @(posedge clk, negedge rst_L) begin
     if (~rst_L)
       result <= 0;
     else if (~stall) begin
@@ -39,8 +39,6 @@ module bitStreamEncoder_tb;
     pkt_avail <= 0;
     repeat (33) @(posedge clk);
     // test stall
-    rst_L <= 0; @(posedge clk);
-    rst_L <= 1; @(posedge clk);
     pkt_avail <= 1;
     $display("SENDING OUT to endpoint 4 with stall");
     @(posedge clk);
@@ -56,8 +54,6 @@ module bitStreamEncoder_tb;
     pkt_avail <= 0;
     repeat (97) @(posedge clk);
     // test sending ACK
-    rst_L <= 0; @(posedge clk);
-    rst_L <= 1; @(posedge clk);
     $display("SENDING ACK");
     pid_in <= 8'b1101_0010;
     pkt_avail <= 1;
@@ -87,7 +83,7 @@ module big_tb;
 
   bitStreamEncoder dut0(.*, .bit_out(raw_bit_stream));
   bitStuffer dut1(.*, .bit_in(raw_bit_stream), .bit_out(stuffed_bit_stream));
-  nrzi dut2(.*, .bit_stream(stuffed_bit_stream));
+  nrzi dut2(.*, .bit_in(stuffed_bit_stream), .bit_out(stream_out));
   dpdm d1(.*);
   clock c1(.*);
 
@@ -103,7 +99,7 @@ module big_tb;
   end
 
   initial begin
-    rst_L <= 0; @(posedge clk);
+    rst_L = 0; @(posedge clk);
     pid_in <= 0; addr_in <= 0; endp_in <= 0; data_in <= 0; pkt_avail <= 0;
     rst_L <= 1; @(posedge clk);
     // test sending OUT to endpoint 4, data = CAFEBABEDEADBEEF
@@ -240,7 +236,7 @@ module clock(
 
   initial begin 
     clk = 1;
-    forever #5 clk = ~clk;
+    forever #1 clk = ~clk;
   end
 endmodule: clock
 
