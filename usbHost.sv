@@ -1,9 +1,10 @@
-// Write your usb host here.  Do not modify the port list.
+
+/*// Write your usb host here.  Do not modify the port list.
 module usbHost
   (input logic clk, rst_L, 
   usbWires wires);
  
-  /* Tasks needed to be finished to run testbenches */
+  // Tasks needed to be finished to run testbenches
 
   task prelabRequest
   // sends an OUT packet with ADDR=5 and ENDP=4
@@ -37,6 +38,9 @@ module usbHost
 
 
 endmodule: usbHost
+
+*/
+
 
 // takes a packet and converts it to a bit string when sent_sync is asserted.
 // asserts last when on the last bit of the bit stream.
@@ -596,27 +600,125 @@ module nrzi(
     next_nrzi_state = nrzi_state;
     case (nrzi_state)
       START: begin
-        //prev_bit = 1'b1;
         if (~pkt_avail)
           next_nrzi_state = START;
         else if (pkt_avail) begin
           next_nrzi_state = RUN;
           //stream_out = (bit_stream) ? prev_bit : ~prev_bit;
-          //prev_bit = stream_out;
         end
       end
       RUN: begin
         if (last) begin
           next_nrzi_state = START;
-          //prev_bit = 1'b1;
         end
         else if (~last) begin
           // output         stays the same on 1   changes on 0
           stream_out = (bit_stream) ? prev_bit : ~prev_bit;
-          //prev_bit = stream_out;
           next_nrzi_state = RUN;
         end
       end
     endcase
   end
 endmodule: nrzi
+  
+/*
+function J(usbWires wiresJ);
+  wires.DP = 1'b1;
+  wires.DM = 1'b0;
+endfunction
+
+task K(usbWires wires);
+  wires.DP = 1'b0;
+  wires.DM = 1'b1;
+endtask
+
+task SE0(usbWires wires);
+  wires.DP = 1'b0;
+  wires.DP = 1'b0;
+entask
+
+task EOP(input logic clk, usbWires wires);
+  SE0(wires);
+  @(posedge clk);
+  SEO(wires);
+  @(posedge clk);
+  J(wires);
+  @(posedge clk);
+endtask
+
+task SYNC(input logic clk, usbWires wires);
+  repeat (7) begin
+    K(wires);
+    @(posedge clk);
+  end
+  J(wires);
+  @(posedge clk);
+endtask
+*/
+interface usbWires;
+  tri0 DP;
+  tri0 DM;
+endinterface
+
+module dpdm(
+  input logic stream_out, pkt_avail, last,
+  input logic clk, rst);
+  // ummm you put these wires here right?
+
+  usbWires wires();
+  // note to self: tri0 net pull down when not driven
+
+  enum logic [2:0] {IDLE, PACKET, EOP1, EOP2, EOP3
+                  } DPDM_state, next_DPDM_state;
+
+  always_ff @(posedge clk) begin
+    if (rst)
+      DPDM_state <= IDLE;
+    else if (~rst)
+      DPDM_state <= next_DPDM_state;
+  end
+
+  always_comb begin
+    next_DPDM_state = DPDM_state;
+    case (DPDM_state)
+      IDLE:   begin
+        if (pkt_avail) begin
+          next_DPDM_state = PACKET;
+          //magic stuff here
+        end
+        else
+          next_DPDM_state = IDLE;
+      end
+      PACKET: begin
+        if (stream_out) begin
+          wires.DP = 1'b1;
+          wires.DM = 1'b0;
+        end
+        else if (~stream_out) begin
+          wires.DP = 1'b0;
+          wires.DM = 1'b1;
+        end
+        // last is sent on same as last bit of stream_out
+        if (last)
+          next_DPDM_state = EOP1;
+        else if (~last) 
+          next_DPDM_state = PACKET;
+      end
+      EOP1:   begin
+        wires.DP = 1'b0;
+        wires.DM = 1'b0;
+        next_DPDM_state = EOP2;
+      end
+      EOP2:   begin
+        wires.DP = 1'b0;
+        wires.DM = 1'b0;
+        next_DPDM_state = EOP3;
+      end
+      EOP3:   begin
+        wires.DP = 1'b0;
+        wires.DM = 1'b1;
+        next_DPDM_state = IDLE;
+      end
+    endcase
+  end
+endmodule: dpdm

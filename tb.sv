@@ -12,11 +12,7 @@ module bitStreamEncoder_tb;
   logic [95:0]  result;   // largest is SYNC + PID + DATA0 + CRC16
 
   bitStreamEncoder dut(.*);
-
-  initial begin
-    clk = 1;
-    forever #1 clk = ~clk;
-  end
+  clock c1(.*);
 
   // used for keeping track of the bit stream
   // note that result is always 1 clock cycle late!
@@ -84,17 +80,15 @@ module big_tb;
   logic        stall;
   logic        start, last;
   logic        raw_bit_stream, stuffed_bit_stream, stream_out;
+  usbWires wires();
 
   logic [109:0]  result;   // largest is SYNC + PID + DATA0 + CRC16
 
   bitStreamEncoder dut0(.*, .bit_out(raw_bit_stream));
   bitStuffer dut1(.*, .bit_in(raw_bit_stream), .bit_out(stuffed_bit_stream));
   nrzi dut2(.*, .bit_stream(stuffed_bit_stream));
-
-  initial begin
-    clk = 1;
-    forever #1 clk = ~clk;
-  end
+  clock c1(.*);
+  dpdm(.*);
 
   // used for keeping track of the bit stream
   // note that result is always 1 clock cycle late!
@@ -153,11 +147,7 @@ module bitStuffer_tb;
   logic stall;
 
   bitStuffer dut(.*);
-
-  initial begin
-    clk = 0;
-    forever #5 clk = ~clk;
-  end
+  clock c1(.*);
 
   initial begin
     $monitor($time,, "bit_in = %b, bit_out = %b, stall = %b",
@@ -183,16 +173,12 @@ module bitStuffer_tb;
 endmodule
 
 module nrzi_tb;
-  logic bit_stream, pkt_avail;
+  logic bit_stream, pkt_avail, last;
   logic clk, rst;
   logic stream_out;
 
-  initial begin
-    clk = 1;
-    forever #5 clk = ~clk;
-  end
-
   nrzi n1(.*);
+  clock c1(.*);
 
   initial begin
     $monitor($time,, "bit_stream = %b, pkt_avail = %b, stream_out = %b, prev_bit = %b, state %b",
@@ -205,29 +191,27 @@ module nrzi_tb;
     @(posedge clk);
     bit_stream <= 1'b0;
     pkt_avail <= 1'b0;
-    @(posedge clk);
-    @(posedge clk);
-    @(posedge clk);
-    @(posedge clk);
-    @(posedge clk);
-    @(posedge clk);
+    repeat (6) @(posedge clk);
     bit_stream <= 1'b1;
-    @(posedge clk);
-    @(posedge clk);
-    @(posedge clk);
+    repeat (3) @(posedge clk);
     pkt_avail <= 1'b1;
     @(posedge clk);
     pkt_avail <= 1'b0;
-    @(posedge clk);
-    @(posedge clk);
-    @(posedge clk);
-    @(posedge clk);
-    @(posedge clk);
-    @(posedge clk);
+    repeat (6) @(posedge clk);
     bit_stream <= 1'b0;
-    @(posedge clk);
-    @(posedge clk);
-    @(posedge clk);
+    repeat (3) @(posedge clk);
     $finish;
   end
 endmodule: nrzi_tb
+
+
+module clock(
+  output logic clk);
+
+  initial begin 
+    clk = 1;
+    forever #5 clk = ~clk;
+  end
+endmodule: clock
+
+
