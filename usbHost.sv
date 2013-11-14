@@ -113,19 +113,20 @@ module bitStreamEncoder(
 
   // FSM: controls stuff, keeps track of state
   always_ff @(posedge clk, posedge rst) begin
-    if (rst)
+    if (rst) begin
+      sync_cnt <= 0;
+      pid_cnt <= 0;
+      addr_cnt <= 0;
+      endp_cnt <= 0;
+      data_cnt <= 0;
+      crc5_cnt <= 0;
+      crc16_cnt <= 0;
       state <= IDLE;
+    end
     else if (~stall) begin
       // only do stuff if no stall signal from bit stuffing
       case (state)
         IDLE:   begin
-                  sync_cnt <= 0;
-                  pid_cnt <= 0;
-                  addr_cnt <= 0;
-                  endp_cnt <= 0;
-                  data_cnt <= 0;
-                  crc5_cnt <= 0;
-                  crc16_cnt <= 0;
                   state <= (pkt_avail) ? SYNC : IDLE;
                 end
         SYNC:   begin
@@ -518,9 +519,10 @@ module crc16Receiver(
 
 endmodule
 
-
+// for stuffing bits.
 module bitStuffer(
   input   logic clk, rst,
+  input   logic pkt_avail,
   input   logic start,
   input   logic last,
   input   logic bit_in,
@@ -542,6 +544,8 @@ module bitStuffer(
   // FSM
   always_ff @(posedge clk, posedge rst) begin
     if (rst)
+      state <= IDLE;
+    else if (pkt_avail) 
       state <= IDLE;
     else begin
       case (state)

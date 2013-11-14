@@ -116,8 +116,6 @@ module big_tb;
     pkt_avail <= 0;
     repeat (40) @(posedge clk);
     // test sending DATA
-    rst <= 1; @(posedge clk);
-    rst <= 0; @(posedge clk);
     $display("SENDING DATA = CAFEBABEDEADBEEF");
     pid_in <= 8'b1100_0011; data_in <= 64'hCAFEBABEDEADBEEF;
     pkt_avail <= 1;
@@ -125,8 +123,6 @@ module big_tb;
     pkt_avail <= 0;
     repeat (110) @(posedge clk);
     // test sending ACK
-    rst <= 1; @(posedge clk);
-    rst <= 0; @(posedge clk);
     $display("SENDING ACK");
     pid_in <= 8'b1101_0010;
     pkt_avail <= 1;
@@ -141,6 +137,7 @@ endmodule
 // test bit stuffing
 module bitStuffer_tb;
   logic clk, rst;
+  logic pkt_avail;
   logic start;
   logic last;
   logic bit_in;
