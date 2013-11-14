@@ -679,7 +679,6 @@ module dpdm(
     en_dm = 0;
     case (DPDM_state)
       IDLE:   begin
-        $display("JKFSLE");
         if (pkt_avail) begin
           next_DPDM_state = PACKET;
         end

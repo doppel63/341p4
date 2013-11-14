@@ -216,7 +216,7 @@ module dpdm_tb;
   initial begin
     $monitor($time,, "s_out = %b, pkt_avail = %b, en = %b, last = %b, \
 rst = %b, dm = %b, dp = %b, state = %s", stream_out, pkt_avail, dpdm1.en, 
-      last, rst, dpdm1.dm, dpdm1.dp, dpdm1.DPDM_state);
+      last, rst, wires.DM, wires.DP, dpdm1.DPDM_state);
     @(posedge clk);
     rst <= 1'b1;
     @(posedge clk);
@@ -232,16 +232,8 @@ rst = %b, dm = %b, dp = %b, state = %s", stream_out, pkt_avail, dpdm1.en,
       @(posedge clk);
     end
     @(posedge clk);
-    @(posedge clk);
-    @(posedge clk);
-    @(posedge clk);
-    @(posedge clk);
     last <= 1;
-    @(posedge clk);
-    @(posedge clk);
-    @(posedge clk);
-    @(posedge clk);
-    @(posedge clk);
+    repeat (6) @(posedge clk);
     $finish;
   end
 endmodule
