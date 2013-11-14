@@ -1,8 +1,10 @@
-
-/*// Write your usb host here.  Do not modify the port list.
+/*
+// Write your usb host here.  Do not modify the port list.
 module usbHost
   (input logic clk, rst_L, 
   usbWires wires);
+
+  assign wires.DP =  
  
   // Tasks needed to be finished to run testbenches
 
@@ -30,16 +32,8 @@ module usbHost
    output bit        success);
 
   endtask: writeData
-
-
-
-  // usbHost starts here!!
-
-
-
 endmodule: usbHost
-
-*/
+  */
 
 
 // takes a packet and converts it to a bit string when sent_sync is asserted.
@@ -622,10 +616,6 @@ module nrzi(
 endmodule: nrzi
   
 /*
-function J(usbWires wiresJ);
-  wires.DP = 1'b1;
-  wires.DM = 1'b0;
-endfunction
 
 task K(usbWires wires);
   wires.DP = 1'b0;
@@ -662,10 +652,16 @@ endinterface
 
 module dpdm(
   input logic stream_out, pkt_avail, last,
-  input logic clk, rst);
+  input logic clk, rst,
+  usbWires wires);
   // ummm you put these wires here right?
+  logic dp, dm, en, en_dp, en_dm;
 
-  usbWires wires();
+  assign wires.DP = (en) ? en_dp : 1'bz;
+  assign wires.DM = (en) ? en_dm : 1'bz;
+  assign dp = wires.DP;
+  assign dm = wires.DM;
+  
   // note to self: tri0 net pull down when not driven
 
   enum logic [2:0] {IDLE, PACKET, EOP1, EOP2, EOP3
@@ -680,23 +676,23 @@ module dpdm(
 
   always_comb begin
     next_DPDM_state = DPDM_state;
+    en = 1'b1;
     case (DPDM_state)
       IDLE:   begin
         if (pkt_avail) begin
           next_DPDM_state = PACKET;
-          //magic stuff here
         end
         else
           next_DPDM_state = IDLE;
       end
       PACKET: begin
         if (stream_out) begin
-          wires.DP = 1'b1;
-          wires.DM = 1'b0;
+          en_dp = 1'b1;
+          en_dm = 1'b0;
         end
         else if (~stream_out) begin
-          wires.DP = 1'b0;
-          wires.DM = 1'b1;
+          en_dp = 1'b0;
+          en_dm = 1'b1;
         end
         // last is sent on same as last bit of stream_out
         if (last)
@@ -705,18 +701,18 @@ module dpdm(
           next_DPDM_state = PACKET;
       end
       EOP1:   begin
-        wires.DP = 1'b0;
-        wires.DM = 1'b0;
+        en_dp = 1'b0;
+        en_dm = 1'b0;
         next_DPDM_state = EOP2;
       end
       EOP2:   begin
-        wires.DP = 1'b0;
-        wires.DM = 1'b0;
+        en_dp = 1'b0;
+        en_dm = 1'b0;
         next_DPDM_state = EOP3;
       end
       EOP3:   begin
-        wires.DP = 1'b0;
-        wires.DM = 1'b1;
+        en_dp = 1'b0;
+        en_dm = 1'b1;
         next_DPDM_state = IDLE;
       end
     endcase
