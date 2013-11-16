@@ -1,4 +1,17 @@
-/* Write your usb host here.  Do not modify the port list. */
+/* usbHost.sv
+ * Xiang Lin (xianglin)
+ * Doci Mou (dmou)
+ * 18-341 P4
+ * November 14, 2013
+ */
+
+/****************
+ *   USBHOST    *
+ ****************
+ * This module instantiates our bit stream encoder, bit stuffer, nrzi, and
+ * dpdm modules in order to create a cohesive host module.  It also includes
+ * various tasks that send, read, and write a packet.
+ */
 module usbHost
   (input logic clk, rst_L, 
   usbWires wires);
@@ -18,9 +31,10 @@ module usbHost
   
   // Tasks needed to be finished to run testbenches
 
-  task prelabRequest
+  /* PRELABREQUEST */
   // sends an OUT packet with ADDR=5 and ENDP=4
   // packet should have SYNC and EOP too
+  task prelabRequest
   (input bit  [7:0] data);
 
   pid_in <= 8'b1110_0001; addr_in <= 5; endp_in <= 4;
@@ -31,27 +45,35 @@ module usbHost
 
   endtask: prelabRequest
 
-  task readData
+  /* READDATA */
   // host sends memPage to thumb drive and then gets data back from it
   // then returns data and status to the caller
+  task readData
   (input  bit [15:0]  mempage, // Page to write
    output bit [63:0] data, // array of bytes to write
    output bit        success);
 
   endtask: readData
 
-  task writeData
+  /* WRITEDATA */
   // Host sends memPage to thumb drive and then sends data
   // then returns status to the caller
+  task writeData
   (input  bit [15:0]  mempage, // Page to write
    input  bit [63:0] data, // array of bytes to write
    output bit        success);
 
   endtask: writeData
+
 endmodule: usbHost
 
-// takes a packet and converts it to a bit string when sent_sync is asserted.
-// asserts last when on the last bit of the bit stream.
+/*************************
+ *    BITSTREAMENCODER   *
+ *************************
+ * This module takes the information wtihin a packet and converts it to a
+ * a serial bit string when sent_sync is toggled.  It also asserts flag 
+ * last at the same clock cycle as the last bit of the input.
+ */
 module bitStreamEncoder(
   input   logic        clk, rst_L,
   input   bit        pkt_avail,
@@ -66,10 +88,12 @@ module bitStreamEncoder(
   enum bit [7:0] {OUT = 8'b1110_0001, IN = 8'b0110_1001,
                     DATA0 = 8'b1100_0011,
                     ACK = 8'b1101_0010, NAK = 8'b0101_1010} pid;
+
   bit [6:0]   addr;
   bit [3:0]   endp;
   bit [63:0]  data;
   bit         crc5_in, crc5, crc16_in, crc16;
+
   // internal control points; also wires anyway
   bit         crc5_en, crc16_en;
   bit [2:0]   sync_cnt;
@@ -82,8 +106,7 @@ module bitStreamEncoder(
   // states for FSM
   enum bit [2:0] {IDLE, SYNC, PID, ADDR, ENDP, CRC5, DATA, CRC16} state;
 
-  // instantiate stuff in datapath
-  // use counters as registers for holding stuff
+  // instantiate counters datapath as registers for holding stuff
   counter #(8)  pidReg(.clk(clk), .rst_L(rst_L), .clr(), .ld(pkt_avail), .en(),
                        .up(), .val(pid_in), .cnt(pid));
   counter #(7)  addrReg(.clk(clk), .rst_L(rst_L), .clr(), .ld(pkt_avail), .en(),
@@ -92,7 +115,7 @@ module bitStreamEncoder(
                         .up(), .val(endp_in), .cnt(endp));
   counter #(64) dataReg(.clk(clk), .rst_L(rst_L), .clr(), .ld(pkt_avail), .en(),
                         .up(), .val(data_in), .cnt(data));
-  // crc sender modules
+
   crc5Sender  crc5s(.clk(clk), .rst_L(rst_L), .en(~stall && crc5_en),
                       .msg_in(crc5_in), .msg_out(crc5));
   crc16Sender crc16s(.clk(clk), .rst_L(rst_L), .en(~stall && crc16_en),
@@ -128,7 +151,6 @@ module bitStreamEncoder(
             (pid == PID && pid_cnt == 7));
   end
 
-  // FSM: controls stuff, keeps track of state
   always_ff @(posedge clk, negedge rst_L) begin
     if (~rst_L) begin
       sync_cnt <= 0;
@@ -141,7 +163,7 @@ module bitStreamEncoder(
       state <= IDLE;
     end
     else if (~stall) begin
-      // only do stuff if no stall signal from bit stuffing
+      // only change values if no stall signal from bit stuffing
       case (state)
         IDLE:   begin
                   state <= (pkt_avail) ? SYNC : IDLE;
@@ -187,11 +209,13 @@ module bitStreamEncoder(
       endcase
     end
   end
+endmodule: bitStreamEncoder
 
-endmodule
-
-// CRC stuff
-// CRC5 calculator: rem 01100
+/******************
+ *    CRC5CALC    *
+ ******************
+ * Module calculating the CRC of input, with intended remainder 5'b01100.
+ */
 module crc5Calc(
   input   logic clk, rst_L,
   input   bit   en, crc_clr, crc_in,
@@ -211,7 +235,11 @@ module crc5Calc(
 
 endmodule
 
-// CRC16 calculator: rem 800d
+/*******************
+ *    CRC16CALC    *
+ *******************
+ * Module calculating the CRC of input, with intended remainder 16'd800.
+ */
 module crc16Calc(
   input   logic         clk, rst_L,
   input   bit         en, crc_clr, crc_in,
@@ -232,8 +260,12 @@ module crc16Calc(
 
 endmodule
 
-
-// counter: default 4 bits wide
+/**************
+ *   COUNTER  *
+ **************
+ * Basic counter module with clear, load, enable, up(/down) inputs.  Defaults
+ * to four bits of input/output.
+ */
 module counter
   #(parameter WIDTH = 4)
   (input  logic             clk, rst_L,
@@ -256,7 +288,12 @@ module counter
   end
 endmodule
 
-// shift reg: default 11 bits wide
+
+/****************
+ *   SHIFTREG   *
+ ****************
+ * Basic left shift register module.  Defaults to eleven bits of input/output.
+ */
 module shiftReg
   #(parameter WIDTH = 11)
   (input  logic             clk, rst_L,
@@ -275,7 +312,12 @@ module shiftReg
   end
 endmodule
 
-// CRC5 sender
+
+/********************
+ *    CRC5SENDER    *
+ ********************
+ * Module that sends values to the CRC5 calculator.
+ */
 module crc5Sender(
   input   logic clk, rst_L,
   input   bit en, msg_in,
@@ -287,15 +329,13 @@ module crc5Sender(
   bit cnt_clr, cnt_en, cnt_up;
   bit rem_ld, rem_en, rem_up;
   bit [3:0] cnt, rem_cnt;
-
   bit body, firstRem, rem_bit;
+  
   enum bit [1:0] {BODY, REM, DONE} cs, ns;
 
-  // instantiate stuff
   crc5Calc calc(.*);
   counter msgCnt(clk, rst_L, cnt_clr, , en && cnt_en, cnt_up, , cnt);
   counter remCnt(clk, rst_L, , rem_ld, en && rem_en, rem_up, 4'd3, rem_cnt);
-  // counters work as regs too!
   counter #(5) rem(clk, rst_L, , rem_ld, , , ~crc_out, com_rem);
 
   // muxes
@@ -303,7 +343,6 @@ module crc5Sender(
   assign rem_bit = (firstRem) ? ~crc_out[4] : com_rem[rem_cnt];
   assign msg_out = crc_in;
 
-  // FSM to control state
   always_ff @(posedge clk, negedge rst_L) begin
     if (~rst_L)
       cs <= BODY;
@@ -311,15 +350,15 @@ module crc5Sender(
       cs <= ns;
   end
 
-  // ns/output logic
+  // Next state output logic
   always_comb begin
-    // defaults
     body = 1;
     firstRem = 1;
     crc_clr = 0;
     cnt_clr = 0; cnt_en = 0; cnt_up = 0;
     rem_ld = 0; rem_en = 0; rem_up = 0;
     ns = cs;
+
     case (cs)
       BODY: begin
               cnt_en = (cnt != 11) ? 1 : 0;
@@ -343,10 +382,14 @@ module crc5Sender(
             end
     endcase
   end
+endmodule: crc5Sender
 
-endmodule
 
-// CRC16 sender
+/********************
+ *    CRC16SENDER   *
+ ********************
+ * Module that sends values to the CRC16 calculator.
+ */
 module crc16Sender(
   input   logic clk, rst_L,
   input   bit en, msg_in,
@@ -359,23 +402,20 @@ module crc16Sender(
   bit rem_ld, rem_en, rem_up;
   bit [6:0] cnt;
   bit [3:0] rem_cnt;
-
   bit body, firstRem, rem_bit;
+
   enum bit [1:0] {BODY, REM, DONE} cs, ns;
 
-  // instantiate stuff
   crc16Calc calc(.*);
   counter #(7) msgCnt(clk, rst_L, cnt_clr, , en && cnt_en, cnt_up, , cnt);
   counter remCnt(clk, rst_L, , rem_ld, en && rem_en, rem_up, 4'd14, rem_cnt);
-  // counters work as regs too!
   counter #(16) rem(clk, rst_L, , rem_ld, , , ~crc_out, com_rem);
 
-  // muxes
   assign crc_in = (body) ? msg_in : rem_bit;
   assign rem_bit = (firstRem) ? ~crc_out[15] : com_rem[rem_cnt];
   assign msg_out = crc_in;
 
-  // FSM to control state
+  // FSM state logic
   always_ff @(posedge clk, negedge rst_L) begin
     if (~rst_L)
       cs <= BODY;
@@ -383,9 +423,8 @@ module crc16Sender(
       cs <= ns;
   end
 
-  // ns/output logic
+  // Next state and output logic
   always_comb begin
-    // defaults
     body = 1;
     firstRem = 1;
     crc_clr = 0;
@@ -415,10 +454,14 @@ module crc16Sender(
             end
     endcase
   end
+endmodule: crc16Sender
 
-endmodule
 
-// CRC5 receiver
+/*********************
+ *    CRC5RECEIVER   *
+ *********************
+ * Module that receives values from the CRC5 calculator.
+ */
 module crc5Receiver(
   input   logic         clk, rst_L,
   input   bit         en, msg_in,
@@ -430,16 +473,16 @@ module crc5Receiver(
   bit       crc_clr;
   bit       cnt_clr, cnt_en, cnt_up;
   bit [3:0] cnt;
+
   enum bit [1:0] {BODY, REM, DONE} cs, ns;
 
-  // instantiate stuff
   crc5Calc calc(clk, rst_L, en, crc_clr, msg_in, crc_out);
   shiftReg rcvd(clk, rst_L, , en && rcv_en, msg_in, msg);
   counter msgCnt(clk, rst_L, cnt_clr, , en && cnt_en, cnt_up, , cnt);
 
   assign OK = crc_out == 5'b01100;
 
-  // FSM to control state
+  // FSM state logic
   always_ff @(posedge clk, negedge rst_L) begin
     if (~rst_L)
       cs <= BODY;
@@ -447,9 +490,8 @@ module crc5Receiver(
       cs <= ns;
   end
 
-  // ns/output logic
+  // Next state and output logic
   always_comb begin
-    // defaults
     cnt_clr = 0; cnt_en = 0; cnt_up = 0;
     rcv_en = 0;
     done = 0;
@@ -475,13 +517,18 @@ module crc5Receiver(
             end
     endcase
   end
-
+  /*
   always @(posedge done)
     #1 $display("msg received! msg: %b, OK = %b", msg, OK);
+  */
+endmodule: crc5Receiver
 
-endmodule
 
-// CRC16 receiver
+/**********************
+ *    CRC16RECEIVER   *
+ **********************
+ * Module that receives values from the CRC16 calculator.
+ */
 module crc16Receiver(
   input   logic         clk, rst_L,
   input   bit         en, msg_in,
@@ -495,14 +542,13 @@ module crc16Receiver(
   bit [6:0] cnt;
   enum bit [1:0] {BODY, REM, DONE} cs, ns;
 
-  // instantiate stuff
   crc16Calc calc(clk, rst_L, en, crc_clr, msg_in, crc_out);
   shiftReg #(64) rcvd(clk, rst_L, , en && rcv_en, msg_in, msg);
   counter #(7) msgCnt(clk, rst_L, cnt_clr, , en && cnt_en, cnt_up, , cnt);
 
   assign OK = crc_out == 16'h800D;
 
-  // FSM to control state
+  // FSM state logic
   always_ff @(posedge clk, negedge rst_L) begin
     if (~rst_L)
       cs <= BODY;
@@ -510,9 +556,8 @@ module crc16Receiver(
       cs <= ns;
   end
 
-  // ns/output logic
+  // Next state and output logic
   always_comb begin
-    // defaults
     cnt_clr = 0; cnt_en = 0; cnt_up = 0;
     rcv_en = 0;
     done = 0;
@@ -538,13 +583,21 @@ module crc16Receiver(
             end
     endcase
   end
-
+  /*
   always @(posedge done)
     #1 $display("msg received! msg: %h, OK = %b", msg, OK);
+  */
+endmodule: crc16Receiver
 
-endmodule
 
-// for stuffing bits.
+/*******************
+ *    BITSTUFFER   *
+ *******************
+ * When there have been six 1'b1s in a row, a 0 bit is added to the output
+ * sequence and the stall flag is toggled.
+ */
+// for stuffing bits. 
+//          NOTE: damnit linky.
 module bitStuffer(
   input   logic clk, rst_L,
   input   bit pkt_avail,
@@ -556,6 +609,7 @@ module bitStuffer(
 
   bit       clr;
   bit [2:0] cnt;
+
   enum bit [1:0] {IDLE, COUNTING, STALL} state;
 
   assign bit_out = (stall) ? 0 : bit_in;
@@ -563,10 +617,11 @@ module bitStuffer(
   assign clr = state == IDLE;
 
   // counter for counting 1's. sounds like a band name
+  //        NOTE:  ...
   counter #(3) onesCnt(.clk(clk), .rst_L(rst_L), .clr(stall|clr|~bit_in), .ld(),
                        .en(bit_in), .up(bit_in), .val(), .cnt(cnt));
 
-  // FSM
+  // FSM logic
   always_ff @(posedge clk, negedge rst_L) begin
     if (~rst_L)
       state <= IDLE;
@@ -581,9 +636,16 @@ module bitStuffer(
       endcase
     end
   end
+endmodule: bitStuffer
 
-endmodule
 
+/************
+ *   NRZI   *
+ ************
+ * Module "decodes" input bit_stream into serial output stream_out.  Values
+ * remain the same if the current input bit is 1'b1 and flip when the current
+ * input bit is 1'b0.
+ */
 module nrzi(
   input     reg       bit_stream,
   input     bit       pkt_avail,
@@ -592,14 +654,6 @@ module nrzi(
   output    reg       stream_out);
 
   reg                   prev_bit;
-
-  /***
-   * Things to remember:
-   *    - output changes on 0
-   *    - output stays the same on 1
-   *    - first output bit is as if previous bit was a 1
-   *    - all field types are sent except for the EOP
-   */
 
   enum logic {START, RUN
               } nrzi_state, next_nrzi_state;
@@ -641,76 +695,26 @@ module nrzi(
     endcase
   end
 endmodule: nrzi
-/*
-// nrzi
-module nrzi(
-  input   logic clk, rst_L,
-  input   bit bit_in,
-  output  bit bit_out);
 
-  bit prev_bit;
 
-  always_ff @(posedge clk, negedge rst_L) begin
-    if (~rst_L)
-      prev_bit <= 1'b1;
-    else
-      prev_bit <= bit_out;
-  end
-
-  assign bit_out = (bit_in) ? prev_bit : ~prev_bit;
-
-endmodule
- */ 
-/*
-
-task K(usbWires wires);
-  wires.DP = 1'b0;
-  wires.DM = 1'b1;
-endtask
-
-task SE0(usbWires wires);
-  wires.DP = 1'b0;
-  wires.DP = 1'b0;
-entask
-
-task EOP(input bit clk, usbWires wires);
-  SE0(wires);
-  @(posedge clk);
-  SEO(wires);
-  @(posedge clk);
-  J(wires);
-  @(posedge clk);
-endtask
-
-task SYNC(input logic clk, usbWires wires);
-  repeat (7) begin
-    K(wires);
-    @(posedge clk);
-  end
-  J(wires);
-  @(posedge clk);
-endtask
-
-interface usbWires;
-  tri0 DP;
-  tri0 DM;
-endinterface
-*/
+/************
+ *   DPDM   *
+ ************
+ * This module converts the output stream from the nrzi module to D+ and D-
+ * values for the usbWires bus, declared in the top module as wires.
+ */
 module dpdm(
   input bit stream_out, pkt_avail, last,
   input logic clk, rst_L,
   usbWires wires);
-  // ummm you put these wires here right?
+
   bit dp, dm, en, en_dp, en_dm;
 
   assign wires.DP = (en) ? en_dp : 1'bz;
   assign wires.DM = (en) ? en_dm : 1'bz;
-  //assign dp = wires.DP;
   assign dp = wires.DP;
   assign dm = wires.DM;
   
-  // note to self: tri0 net pull down when not driven
-
   enum bit [2:0] {IDLE, PACKET, EOP1, EOP2, EOP3
                   } DPDM_state, next_DPDM_state;
 
@@ -744,7 +748,6 @@ module dpdm(
           en_dp = 1'b0;
           en_dm = 1'b1;
         end
-        // last is sent on same as last bit of stream_out
         if (last)
           next_DPDM_state = EOP1;
         else if (~last) 
@@ -771,3 +774,38 @@ module dpdm(
     endcase
   end
 endmodule: dpdm
+
+/*
+task K(usbWires wires);
+  wires.DP = 1'b0;
+  wires.DM = 1'b1;
+endtask
+
+task SE0(usbWires wires);
+  wires.DP = 1'b0;
+  wires.DP = 1'b0;
+entask
+
+task EOP(input bit clk, usbWires wires);
+  SE0(wires);
+  @(posedge clk);
+  SEO(wires);
+  @(posedge clk);
+  J(wires);
+  @(posedge clk);
+endtask
+
+task SYNC(input logic clk, usbWires wires);
+  repeat (7) begin
+    K(wires);
+    @(posedge clk);
+  end
+  J(wires);
+  @(posedge clk);
+endtask
+
+interface usbWires;
+  tri0 DP;
+  tri0 DM;
+endinterface
+*/
