@@ -655,7 +655,7 @@ module nrzi(
 
   reg                   prev_bit;
 
-  enum bit {START, RUN
+  enum logic {START, RUN
               } nrzi_state, next_nrzi_state;
 
   always_ff @(posedge clk or negedge rst_L) begin
