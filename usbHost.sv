@@ -12,17 +12,17 @@
  * dpdm modules in order to create a cohesive host module.  It also includes
  * various tasks that send, read, and write a packet.
  */
-module usbHost
-  (input logic clk, rst_L, 
+module usbHost(
+  input  logic        clk, rst_L, 
   usbWires wires);
 
-  bit pkt_avail, pkt_sent, stall;
-  bit start, last;
-  bit raw_bit_stream, stuffed_bit_stream, stream_out;
-  bit [7:0] pid_in;
-  bit [6:0] addr_in;
-  bit [3:0] endp_in;
-  bit [63:0] data_in;
+  bit                 pkt_avail, pkt_sent, stall;
+  bit                 start, last;
+  bit                 raw_bit_stream, stuffed_bit_stream, stream_out;
+  bit                 [7:0] pid_in;
+  bit                 [6:0] addr_in;
+  bit                 [3:0] endp_in;
+  bit                 [63:0] data_in;
 
   bitStreamEncoder bse1(.*, .bit_out(raw_bit_stream));
   bitStuffer bs1(.*, .bit_in(raw_bit_stream), .bit_out(stuffed_bit_stream));
@@ -35,7 +35,7 @@ module usbHost
   // sends an OUT packet with ADDR=5 and ENDP=4
   // packet should have SYNC and EOP too
   task prelabRequest
-  (input bit  [7:0] data);
+  (input  bit [7:0]   data);
 
   pid_in <= 8'b1110_0001; addr_in <= 5; endp_in <= 4;
   pkt_avail <= 1;
@@ -48,20 +48,20 @@ module usbHost
   /* READDATA */
   // host sends memPage to thumb drive and then gets data back from it
   // then returns data and status to the caller
-  task readData
-  (input  bit [15:0]  mempage, // Page to write
-   output bit [63:0] data, // array of bytes to write
-   output bit        success);
+  task readData(
+    input   bit [15:0]  mempage, // Page to write
+    output  bit [63:0]  data, // array of bytes to write
+    output  bit         success);
 
   endtask: readData
 
   /* WRITEDATA */
   // Host sends memPage to thumb drive and then sends data
   // then returns status to the caller
-  task writeData
-  (input  bit [15:0]  mempage, // Page to write
-   input  bit [63:0] data, // array of bytes to write
-   output bit        success);
+  task writeData(
+    input   bit [15:0]  mempage, // Page to write
+    input   bit [63:0]  data, // array of bytes to write
+    output  bit         success);
 
   endtask: writeData
 
@@ -75,51 +75,51 @@ endmodule: usbHost
  * last at the same clock cycle as the last bit of the input.
  */
 module bitStreamEncoder(
-  input   logic        clk, rst_L,
-  input   bit        pkt_avail,
-  input   bit [7:0]  pid_in,
-  input   bit [6:0]  addr_in,
-  input   bit [3:0]  endp_in,
-  input   bit [63:0] data_in,
-  input   bit        stall,
-  output  bit        bit_out, start, last);
+  input   logic       clk, rst_L,
+  input   bit         pkt_avail,
+  input   bit [7:0]   pid_in,
+  input   bit [6:0]   addr_in,
+  input   bit [3:0]   endp_in,
+  input   bit [63:0]  data_in,
+  input   bit         stall,
+  output  bit         bit_out, start, last);
 
   // internal wires
-  enum bit [7:0] {OUT = 8'b1110_0001, IN = 8'b0110_1001,
-                    DATA0 = 8'b1100_0011,
-                    ACK = 8'b1101_0010, NAK = 8'b0101_1010} pid;
+  enum    bit [7:0] {OUT = 8'b1110_0001, IN = 8'b0110_1001,
+                      DATA0 = 8'b1100_0011,
+                      ACK = 8'b1101_0010, NAK = 8'b0101_1010} pid;
 
-  bit [6:0]   addr;
-  bit [3:0]   endp;
-  bit [63:0]  data;
-  bit         crc5_in, crc5, crc16_in, crc16;
+  bit [6:0]           addr;
+  bit [3:0]           endp;
+  bit [63:0]          data;
+  bit                 crc5_in, crc5, crc16_in, crc16;
 
   // internal control points; also wires anyway
-  bit         crc5_en, crc16_en;
-  bit [2:0]   sync_cnt;
-  bit [1:0]   endp_cnt;
-  bit [2:0]   pid_cnt, addr_cnt;
-  bit [5:0]   data_cnt;
-  bit [2:0]   crc5_cnt;
-  bit [3:0]   crc16_cnt;
+  bit                 crc5_en, crc16_en;
+  bit [2:0]           sync_cnt;
+  bit [1:0]           endp_cnt;
+  bit [2:0]           pid_cnt, addr_cnt;
+  bit [5:0]           data_cnt;
+  bit [2:0]           crc5_cnt;
+  bit [3:0]           crc16_cnt;
 
   // states for FSM
-  enum bit [2:0] {IDLE, SYNC, PID, ADDR, ENDP, CRC5, DATA, CRC16} state;
+  enum    bit [2:0] {IDLE, SYNC, PID, ADDR, ENDP, CRC5, DATA, CRC16} state;
 
   // instantiate counters datapath as registers for holding stuff
-  counter #(8)  pidReg(.clk(clk), .rst_L(rst_L), .clr(), .ld(pkt_avail), .en(),
-                       .up(), .val(pid_in), .cnt(pid));
-  counter #(7)  addrReg(.clk(clk), .rst_L(rst_L), .clr(), .ld(pkt_avail), .en(),
-                        .up(), .val(addr_in), .cnt(addr));
-  counter #(4)  endpReg(.clk(clk), .rst_L(rst_L), .clr(), .ld(pkt_avail), .en(),
-                        .up(), .val(endp_in), .cnt(endp));
-  counter #(64) dataReg(.clk(clk), .rst_L(rst_L), .clr(), .ld(pkt_avail), .en(),
-                        .up(), .val(data_in), .cnt(data));
+  counter #(8)  pidReg(.clk(clk), .rst_L(rst_L), .clr(), .ld(pkt_avail),
+                        .en(), .up(), .val(pid_in), .cnt(pid));
+  counter #(7)  addrReg(.clk(clk), .rst_L(rst_L), .clr(), .ld(pkt_avail), 
+                        .en(), .up(), .val(addr_in), .cnt(addr));
+  counter #(4)  endpReg(.clk(clk), .rst_L(rst_L), .clr(), .ld(pkt_avail), 
+                        .en(), .up(), .val(endp_in), .cnt(endp));
+  counter #(64) dataReg(.clk(clk), .rst_L(rst_L), .clr(), .ld(pkt_avail), 
+                        .en(), .up(), .val(data_in), .cnt(data));
 
   crc5Sender  crc5s(.clk(clk), .rst_L(rst_L), .en(~stall && crc5_en),
-                      .msg_in(crc5_in), .msg_out(crc5));
+                    .msg_in(crc5_in), .msg_out(crc5));
   crc16Sender crc16s(.clk(clk), .rst_L(rst_L), .en(~stall && crc16_en),
-                      .msg_in(crc16_in), .msg_out(crc16));
+                    .msg_in(crc16_in), .msg_out(crc16));
 
   // combinational logic to fill out gaps. mostly muxes.
   always_comb begin
@@ -127,9 +127,12 @@ module bitStreamEncoder(
     bit_out = 'd0; // could be x?
     crc5_en = 0;
     crc16_en = 0;
+
     case (state)
-      SYNC:             bit_out = sync_cnt == 7;
-      PID:              bit_out = pid[pid_cnt];
+      SYNC:             
+                          bit_out = sync_cnt == 7;
+      PID:              
+                          bit_out = pid[pid_cnt];
       ADDR, ENDP, CRC5: begin
                           bit_out = crc5;
                           crc5_en = 1;
@@ -217,9 +220,9 @@ endmodule: bitStreamEncoder
  * Module calculating the CRC of input, with intended remainder 5'b01100.
  */
 module crc5Calc(
-  input   logic clk, rst_L,
-  input   bit   en, crc_clr, crc_in,
-  output  bit [4:0] crc_out);
+  input   logic       clk, rst_L,
+  input   bit         en, crc_clr, crc_in,
+  output  bit [4:0]   crc_out);
 
   always_ff @(posedge clk, negedge rst_L) begin
     if (~rst_L)
@@ -233,7 +236,7 @@ module crc5Calc(
     end
   end
 
-endmodule
+endmodule: crc5Calc
 
 /*******************
  *    CRC16CALC    *
@@ -241,7 +244,7 @@ endmodule
  * Module calculating the CRC of input, with intended remainder 16'd800.
  */
 module crc16Calc(
-  input   logic         clk, rst_L,
+  input   logic       clk, rst_L,
   input   bit         en, crc_clr, crc_in,
   output  bit [15:0]  crc_out);
 
@@ -258,7 +261,7 @@ module crc16Calc(
     end
   end
 
-endmodule
+endmodule: crc16Calc
 
 /**************
  *   COUNTER  *
@@ -268,7 +271,7 @@ endmodule
  */
 module counter
   #(parameter WIDTH = 4)
-  (input  logic             clk, rst_L,
+  (input  logic           clk, rst_L,
   input   bit             clr, ld, en, up,
   input   bit [WIDTH-1:0] val,
   output  bit [WIDTH-1:0] cnt);
@@ -286,7 +289,7 @@ module counter
       else
         cnt <= cnt - 1;
   end
-endmodule
+endmodule: counter
 
 
 /****************
@@ -310,7 +313,7 @@ module shiftReg
       out[0] <= in;
     end
   end
-endmodule
+endmodule: shiftReg
 
 
 /********************
@@ -319,19 +322,19 @@ endmodule
  * Module that sends values to the CRC5 calculator.
  */
 module crc5Sender(
-  input   logic clk, rst_L,
-  input   bit en, msg_in,
-  output  bit msg_out);
+  input   logic       clk, rst_L,
+  input   bit         en, msg_in,
+  output  bit         msg_out);
 
-  bit crc_in;
-  bit [4:0] crc_out, com_rem;
-  bit crc_clr;
-  bit cnt_clr, cnt_en, cnt_up;
-  bit rem_ld, rem_en, rem_up;
-  bit [3:0] cnt, rem_cnt;
-  bit body, firstRem, rem_bit;
+  bit                 crc_in;
+  bit [4:0]           crc_out, com_rem;
+  bit                 crc_clr;
+  bit                 cnt_clr, cnt_en, cnt_up;
+  bit                 rem_ld, rem_en, rem_up;
+  bit [3:0]           cnt, rem_cnt;
+  bit                 body, firstRem, rem_bit;
   
-  enum bit [1:0] {BODY, REM, DONE} cs, ns;
+  enum    bit [1:0] {BODY, REM, DONE} cs, ns;
 
   crc5Calc calc(.*);
   counter msgCnt(clk, rst_L, cnt_clr, , en && cnt_en, cnt_up, , cnt);
@@ -391,20 +394,20 @@ endmodule: crc5Sender
  * Module that sends values to the CRC16 calculator.
  */
 module crc16Sender(
-  input   logic clk, rst_L,
-  input   bit en, msg_in,
-  output  bit msg_out);
+  input   logic       clk, rst_L,
+  input   bit         en, msg_in,
+  output  bit         msg_out);
 
-  bit crc_in;
-  bit [15:0]  crc_out, com_rem;
-  bit crc_clr;
-  bit cnt_clr, cnt_en, cnt_up;
-  bit rem_ld, rem_en, rem_up;
-  bit [6:0] cnt;
-  bit [3:0] rem_cnt;
-  bit body, firstRem, rem_bit;
+  bit                 crc_in;
+  bit [15:0]          crc_out, com_rem;
+  bit                 crc_clr;
+  bit                 cnt_clr, cnt_en, cnt_up;
+  bit                 rem_ld, rem_en, rem_up;
+  bit [6:0]           cnt;
+  bit [3:0]           rem_cnt;
+  bit                 body, firstRem, rem_bit;
 
-  enum bit [1:0] {BODY, REM, DONE} cs, ns;
+  enum  bit [1:0] {BODY, REM, DONE} cs, ns;
 
   crc16Calc calc(.*);
   counter #(7) msgCnt(clk, rst_L, cnt_clr, , en && cnt_en, cnt_up, , cnt);
@@ -463,18 +466,18 @@ endmodule: crc16Sender
  * Module that receives values from the CRC5 calculator.
  */
 module crc5Receiver(
-  input   logic         clk, rst_L,
+  input   logic       clk, rst_L,
   input   bit         en, msg_in,
   output  bit         done, OK,
   output  bit [10:0]  msg);
 
-  bit [4:0] crc_out;
-  bit       rcv_en;
-  bit       crc_clr;
-  bit       cnt_clr, cnt_en, cnt_up;
-  bit [3:0] cnt;
+  bit [4:0]           crc_out;
+  bit                 rcv_en;
+  bit                 crc_clr;
+  bit                 cnt_clr, cnt_en, cnt_up;
+  bit [3:0]           cnt;
 
-  enum bit [1:0] {BODY, REM, DONE} cs, ns;
+  enum    bit [1:0] {BODY, REM, DONE} cs, ns;
 
   crc5Calc calc(clk, rst_L, en, crc_clr, msg_in, crc_out);
   shiftReg rcvd(clk, rst_L, , en && rcv_en, msg_in, msg);
@@ -530,16 +533,17 @@ endmodule: crc5Receiver
  * Module that receives values from the CRC16 calculator.
  */
 module crc16Receiver(
-  input   logic         clk, rst_L,
+  input   logic       clk, rst_L,
   input   bit         en, msg_in,
   output  bit         done, OK,
   output  bit [63:0]  msg);
 
-  bit [15:0]  crc_out;
-  bit       rcv_en;
-  bit       crc_clr;
-  bit       cnt_clr, cnt_en, cnt_up;
-  bit [6:0] cnt;
+  bit [15:0]          crc_out;
+  bit                 rcv_en;
+  bit                 crc_clr;
+  bit                 cnt_clr, cnt_en, cnt_up;
+  bit [6:0]           cnt;
+
   enum bit [1:0] {BODY, REM, DONE} cs, ns;
 
   crc16Calc calc(clk, rst_L, en, crc_clr, msg_in, crc_out);
@@ -599,18 +603,18 @@ endmodule: crc16Receiver
 // for stuffing bits. 
 //          NOTE: damnit linky.
 module bitStuffer(
-  input   logic clk, rst_L,
-  input   bit pkt_avail,
-  input   bit start,
-  input   bit last,
-  input   bit bit_in,
-  output  bit bit_out,
-  output  bit stall);
+  input   logic       clk, rst_L,
+  input   bit         pkt_avail,
+  input   bit         start,
+  input   bit         last,
+  input   bit         bit_in,
+  output  bit         bit_out,
+  output  bit         stall);
 
-  bit       clr;
-  bit [2:0] cnt;
+  bit                 clr;
+  bit [2:0]           cnt;
 
-  enum bit [1:0] {IDLE, COUNTING, STALL} state;
+  enum    bit [1:0] {IDLE, COUNTING, STALL} state;
 
   assign bit_out = (stall) ? 0 : bit_in;
   assign stall = state == STALL;
@@ -647,15 +651,15 @@ endmodule: bitStuffer
  * input bit is 1'b0.
  */
 module nrzi(
-  input     reg       bit_stream,
-  input     bit       pkt_avail,
-  input     bit       clk, rst_L,
-  input     bit       last,
-  output    reg       stream_out);
+  input   reg         bit_stream,
+  input   bit         pkt_avail,
+  input   bit         clk, rst_L,
+  input   bit         last,
+  output  reg         stream_out);
 
-  reg                   prev_bit;
+  reg                 prev_bit;
 
-  enum bit {START, RUN
+  enum    bit {START, RUN
               } nrzi_state, next_nrzi_state;
 
   always_ff @(posedge clk or negedge rst_L) begin
@@ -702,20 +706,20 @@ endmodule: nrzi
  * values for the usbWires bus, declared in the top module as wires.
  */
 module dpdm(
-  input   bit   stream_out, pkt_avail, last,
-  input   logic clk, rst_L,
-  output  bit   pkt_sent,
-  usbWires wires);
+  input   bit         stream_out, pkt_avail, last,
+  input   logic       clk, rst_L,
+  output  bit         pkt_sent,
+  usbWires            wires);
 
-  bit dp, dm, en, en_dp, en_dm;
+  bit                 dp, dm, en, en_dp, en_dm;
 
   assign wires.DP = (en) ? en_dp : 1'bz;
   assign wires.DM = (en) ? en_dm : 1'bz;
   assign dp = wires.DP;
   assign dm = wires.DM;
   
-  enum bit [2:0] {IDLE, PACKET, EOP1, EOP2, EOP3
-                  } DPDM_state, next_DPDM_state;
+  enum    bit [2:0] {IDLE, PACKET, EOP1, EOP2, EOP3
+                    } DPDM_state, next_DPDM_state;
 
   always_ff @(posedge clk or negedge rst_L) begin
     if (~rst_L)
