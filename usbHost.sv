@@ -238,7 +238,7 @@ endmodule
 /*******************
  *    CRC16CALC    *
  *******************
- * Module calculating the CRC of input, with intended remainder 16'd800.
+ * Module calculating the CRC of input, with intended remainder 16'h800D.
  */
 module crc16Calc(
   input   logic         clk, rst_L,
