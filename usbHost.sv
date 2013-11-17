@@ -5,6 +5,13 @@
  * November 14, 2013
  */
 
+typedef struct packed {
+  bit [7:0]   pid;
+  bit [6:0]   addr;
+  bit [3:0]   endp;
+  bit [63:0]  data;
+} pkt_t;
+
 /****************
  *   USBHOST    *
  ****************
@@ -16,19 +23,29 @@ module usbHost
   (input logic clk, rst_L, 
   usbWires wires);
 
-  bit pkt_avail, pkt_sent, stall;
-  bit start, last;
-  bit raw_bit_stream, stuffed_bit_stream, stream_out;
-  bit [7:0] pid_in;
-  bit [6:0] addr_in;
-  bit [3:0] endp_in;
-  bit [63:0] data_in;
+  // this stuff handles bit-level protocols for sending a packet
+  pkt_t pkt_out;
+  bit   pkt_avail, pkt_sent;
+  bit   send_stall, send_start, send_last;
+  bit   send_raw_bit_stream, send_stuffed_bit_stream, stream_out;
 
-  bitStreamEncoder bse1(.*, .bit_out(raw_bit_stream));
-  bitStuffer bs1(.*, .bit_in(raw_bit_stream), .bit_out(stuffed_bit_stream));
-  nrzi n1(.*, .bit_stream(stuffed_bit_stream), .stream_out(stream_out));
+  bitStreamEncoder bse1(.*, .bit_out(send_raw_bit_stream));
+  bitStuffer bs1(.*, .bit_in(send_raw_bit_stream),
+                    .bit_out(send_stuffed_bit_stream));
+  nrzi n1(.*, .bit_stream(send_stuffed_bit_stream));
+
+  // this stuff handles bit-level protocols for receiving a packet
+  pkt_t pkt_in;
+  bit   pkt_rcvd, pkt_ok, ack;
+  bit   EOP_ok, sending, rcv_last;
+  bit   stream_in;
+
+
+  // dpdm is linked to both parts
   dpdm d1(.*);
-  
+
+
+
   // Tasks needed to be finished to run testbenches
 
   /* PRELABREQUEST */
@@ -37,7 +54,7 @@ module usbHost
   task prelabRequest
   (input bit  [7:0] data);
 
-  pid_in <= 8'b1110_0001; addr_in <= 5; endp_in <= 4;
+  pkt_out.pid <= 8'b1110_0001; pkt_out.addr <= 5; pkt_out.endp <= 4;
   pkt_avail <= 1;
   @(posedge clk);
   pkt_avail <= 0;
@@ -75,20 +92,16 @@ endmodule: usbHost
  * last at the same clock cycle as the last bit of the input.
  */
 module bitStreamEncoder(
-  input   logic        clk, rst_L,
-  input   bit        pkt_avail,
-  input   bit [7:0]  pid_in,
-  input   bit [6:0]  addr_in,
-  input   bit [3:0]  endp_in,
-  input   bit [63:0] data_in,
-  input   bit        stall,
-  output  bit        bit_out, start, last);
+  input   logic clk, rst_L,
+  input   bit   pkt_avail,
+  input   pkt_t pkt_out,
+  input   bit   send_stall,
+  output  bit   bit_out, send_start, send_last);
 
   // internal wires
   enum bit [7:0] {OUT = 8'b1110_0001, IN = 8'b0110_1001,
                     DATA0 = 8'b1100_0011,
                     ACK = 8'b1101_0010, NAK = 8'b0101_1010} pid;
-
   bit [6:0]   addr;
   bit [3:0]   endp;
   bit [63:0]  data;
@@ -108,17 +121,17 @@ module bitStreamEncoder(
 
   // instantiate counters datapath as registers for holding stuff
   counter #(8)  pidReg(.clk(clk), .rst_L(rst_L), .clr(), .ld(pkt_avail), .en(),
-                       .up(), .val(pid_in), .cnt(pid));
+                       .up(), .val(pkt_out.pid), .cnt(pid));
   counter #(7)  addrReg(.clk(clk), .rst_L(rst_L), .clr(), .ld(pkt_avail), .en(),
-                        .up(), .val(addr_in), .cnt(addr));
+                        .up(), .val(pkt_out.addr), .cnt(addr));
   counter #(4)  endpReg(.clk(clk), .rst_L(rst_L), .clr(), .ld(pkt_avail), .en(),
-                        .up(), .val(endp_in), .cnt(endp));
+                        .up(), .val(pkt_out.endp), .cnt(endp));
   counter #(64) dataReg(.clk(clk), .rst_L(rst_L), .clr(), .ld(pkt_avail), .en(),
-                        .up(), .val(data_in), .cnt(data));
+                        .up(), .val(pkt_out.data), .cnt(data));
 
-  crc5Sender  crc5s(.clk(clk), .rst_L(rst_L), .en(~stall && crc5_en),
+  crc5Sender  crc5s(.clk(clk), .rst_L(rst_L), .en(~send_stall && crc5_en),
                       .msg_in(crc5_in), .msg_out(crc5));
-  crc16Sender crc16s(.clk(clk), .rst_L(rst_L), .en(~stall && crc16_en),
+  crc16Sender crc16s(.clk(clk), .rst_L(rst_L), .en(~send_stall && crc16_en),
                       .msg_in(crc16_in), .msg_out(crc16));
 
   // combinational logic to fill out gaps. mostly muxes.
@@ -144,11 +157,11 @@ module bitStreamEncoder(
     crc5_in = (state == ADDR) ? addr[addr_cnt] : endp[endp_cnt];
     crc16_in = data[data_cnt];
     // tell bit stuffer to start checking for 1's on the last bit of PID
-    start = pid_cnt == 7;
+    send_start = pid_cnt == 7;
     // last signal asserted when on the last bit of crc5, crc16 or pid depending
     // on packet AND not stalling for bit stuffing
-    last = ~stall && ((crc5_cnt == 4) || (crc16_cnt == 15) ||
-            (pid == PID && pid_cnt == 7));
+    send_last = ~send_stall && ((crc5_cnt == 4) || (crc16_cnt == 15) ||
+                (pid == PID && pid_cnt == 7));
   end
 
   always_ff @(posedge clk, negedge rst_L) begin
@@ -162,7 +175,7 @@ module bitStreamEncoder(
       crc16_cnt <= 0;
       state <= IDLE;
     end
-    else if (~stall) begin
+    else if (~send_stall) begin
       // only change values if no stall signal from bit stuffing
       case (state)
         IDLE:   begin
@@ -463,7 +476,7 @@ endmodule: crc16Sender
  * Module that receives values from the CRC5 calculator.
  */
 module crc5Receiver(
-  input   logic         clk, rst_L,
+  input   logic       clk, rst_L,
   input   bit         en, msg_in,
   output  bit         done, OK,
   output  bit [10:0]  msg);
@@ -601,25 +614,25 @@ endmodule: crc16Receiver
 module bitStuffer(
   input   logic clk, rst_L,
   input   bit pkt_avail,
-  input   bit start,
-  input   bit last,
+  input   bit send_start,
+  input   bit send_last,
   input   bit bit_in,
   output  bit bit_out,
-  output  bit stall);
+  output  bit send_stall);
 
   bit       clr;
   bit [2:0] cnt;
 
   enum bit [1:0] {IDLE, COUNTING, STALL} state;
 
-  assign bit_out = (stall) ? 0 : bit_in;
-  assign stall = state == STALL;
+  assign bit_out = (send_stall) ? 0 : bit_in;
+  assign send_stall = state == STALL;
   assign clr = state == IDLE;
 
   // counter for counting 1's. sounds like a band name
   //        NOTE:  ...
-  counter #(3) onesCnt(.clk(clk), .rst_L(rst_L), .clr(stall|clr|~bit_in), .ld(),
-                       .en(bit_in), .up(bit_in), .val(), .cnt(cnt));
+  counter #(3) onesCnt(.clk(clk), .rst_L(rst_L), .clr(send_stall|clr|~bit_in),
+                       .ld(), .en(bit_in), .up(bit_in), .val(), .cnt(cnt));
 
   // FSM logic
   always_ff @(posedge clk, negedge rst_L) begin
@@ -629,9 +642,9 @@ module bitStuffer(
       state <= IDLE;
     else begin
       case (state)
-        IDLE:     state <= (start) ? COUNTING : IDLE;
+        IDLE:     state <= (send_start) ? COUNTING : IDLE;
         COUNTING: state <= (cnt == 5 && bit_in) ? STALL : COUNTING;
-        STALL:    state <= (last) ? IDLE : COUNTING;
+        STALL:    state <= (send_last) ? IDLE : COUNTING;
         default:  state <= state;
       endcase
     end
@@ -650,7 +663,7 @@ module nrzi(
   input     reg       bit_stream,
   input     bit       pkt_avail,
   input     bit       clk, rst_L,
-  input     bit       last,
+  input     bit       send_last,
   output    reg       stream_out);
 
   reg                   prev_bit;
@@ -677,14 +690,13 @@ module nrzi(
       START: begin
         if (~pkt_avail)
           next_nrzi_state = START;
-        else if (pkt_avail)
+        else
           next_nrzi_state = RUN;
       end
       RUN: begin
-        if (last) begin
+        if (send_last)
           next_nrzi_state = START;
-        end
-        else if (~last) begin
+        else begin
           // output         stays the same on 1   changes on 0
           stream_out = (bit_stream) ? prev_bit : ~prev_bit;
           next_nrzi_state = RUN;
@@ -702,9 +714,13 @@ endmodule: nrzi
  * values for the usbWires bus, declared in the top module as wires.
  */
 module dpdm(
-  input   bit   stream_out, pkt_avail, last,
   input   logic clk, rst_L,
+  // to sender stuff
+  input   bit   stream_out, pkt_avail, send_last,
   output  bit   pkt_sent,
+  // to receiver stuff
+  output  bit   stream_in, EOP_ok, sending,
+  input   bit   rcv_last, ack,
   usbWires wires);
 
   bit dp, dm, en, en_dp, en_dm;
@@ -713,64 +729,81 @@ module dpdm(
   assign wires.DM = (en) ? en_dm : 1'bz;
   assign dp = wires.DP;
   assign dm = wires.DM;
+  // incoming bit stream is 1 if J, 0 if K or SE0
+  assign stream_in = (dp & ~dm) ? 1'b1 : 1'b0;
   
-  enum bit [2:0] {IDLE, PACKET, EOP1, EOP2, EOP3
+  enum bit [3:0] {IDLE, PACKET, SEOP1, SEOP2, SEOP3, REOP1, REOP2, REOP3, ERROR
                   } DPDM_state, next_DPDM_state;
 
-  always_ff @(posedge clk or negedge rst_L) begin
+  always_ff @(posedge clk, negedge rst_L)
     if (~rst_L)
       DPDM_state <= IDLE;
     else
       DPDM_state <= next_DPDM_state;
-  end
 
   always_comb begin
     next_DPDM_state = DPDM_state;
+    // sending stuff
     en = 1'b0;
     en_dp = 0;
     en_dm = 0;
     pkt_sent = 1'b0;
+    // receiving stuff
+    sending = 0;    // is asserted from first bit of SYNC to last bit of EOP
+    EOP_ok = 1;
     case (DPDM_state)
       IDLE:   begin
-        if (pkt_avail) begin
+        if (pkt_avail)
           next_DPDM_state = PACKET;
-        end
+        else if (rcv_last)
+          next_DPDM_state = REOP1;
         else
           next_DPDM_state = IDLE;
       end
       PACKET: begin
+        sending = 1;
         en = 1'b1;
-        if (stream_out) begin
-          en_dp = 1'b1;
-          en_dm = 1'b0;
-        end
-        else if (~stream_out) begin
-          en_dp = 1'b0;
-          en_dm = 1'b1;
-        end
-        if (last)
-          next_DPDM_state = EOP1;
-        else if (~last) 
-          next_DPDM_state = PACKET;
+        en_dp = (stream_out) ? 1'b1 : 1'b0;
+        en_dm = (stream_out) ? 1'b0 : 1'b1;
+        next_DPDM_state = (send_last) ? SEOP1 : PACKET;
       end
-      EOP1:   begin
+      SEOP1:  begin
+        sending = 1;
         en = 1'b1;
         en_dp = 1'b0;
         en_dm = 1'b0;
-        next_DPDM_state = EOP2;
+        next_DPDM_state = SEOP2;
       end
-      EOP2:   begin
+      SEOP2:  begin
+        sending = 1;
         en = 1'b1;
         en_dp = 1'b0;
         en_dm = 1'b0;
-        next_DPDM_state = EOP3;
+        next_DPDM_state = SEOP3;
       end
-      EOP3:   begin
+      SEOP3:  begin
+        sending = 1;
         en = 1'b1;
         en_dp = 1'b1;
         en_dm = 1'b0;
         pkt_sent = 1'b1;
         next_DPDM_state = IDLE;
+      end
+      REOP1:  begin
+        EOP_ok = (~dp & ~dm) ? 1 : 0;
+        next_DPDM_state = (~dp & ~dm) ? REOP2 : ERROR;
+      end
+      REOP2:  begin
+        EOP_ok = (~dp & ~dm) ? 1 : 0;
+        next_DPDM_state = (~dp & ~dm) ? REOP3 : ERROR;
+      end
+      REOP3:  begin
+        EOP_ok = (dp & ~dm) ? 1 : 0;
+        next_DPDM_state = (dp & ~dm) ? IDLE : ERROR;
+      end
+      ERROR:  begin
+        EOP_ok = 0;
+        next_DPDM_state = (ack) ? IDLE : ERROR;
       end
     endcase
   end
