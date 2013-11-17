@@ -1,13 +1,10 @@
 // test bit stream encoder
 module bitStreamEncoder_tb;
-  logic        clk, rst_L;
-  logic        pkt_avail;
-  logic [7:0]  pid_in;
-  logic [6:0]  addr_in;
-  logic [3:0]  endp_in;
-  logic [63:0] data_in;
-  logic        stall;
-  logic        bit_out, start, last;
+  logic         clk, rst_L;
+  bit           pkt_avail;
+  pkt_t         pkt_out;
+  bit           send_stall;
+  bit           bit_out, send_start, send_last;
 
   logic [95:0]  result;   // largest is SYNC + PID + DATA0 + CRC16
 
@@ -19,7 +16,7 @@ module bitStreamEncoder_tb;
   always_ff @(posedge clk, negedge rst_L) begin
     if (~rst_L)
       result <= 0;
-    else if (~stall) begin
+    else if (~send_stall) begin
       result <= result << 1;
       result[0] <= bit_out;
     end
@@ -30,9 +27,9 @@ module bitStreamEncoder_tb;
     rst_L <= 1; @(posedge clk);
     // test sending OUT to endpoint 4, data = CAFEBABEDEADBEEF
     $monitor($time,, "stall = %b, start = %b, last = %b, result = %h",
-                      stall, start, last, result);
-    stall <= 0;
-    pid_in <= 8'b1110_0001; addr_in <= 5; endp_in <= 4;
+                      send_stall, send_start, send_last, result);
+    send_stall <= 0;
+    pkt_out.pid <= 8'b1110_0001; pkt_out.addr <= 5; pkt_out.endp <= 4;
     pkt_avail <= 1;
     $display("SENDING OUT to endpoint 4");
     @(posedge clk);
@@ -44,18 +41,18 @@ module bitStreamEncoder_tb;
     @(posedge clk);
     pkt_avail <= 0;
     repeat (24) @(posedge clk);
-    stall <= 1; repeat (5) @(posedge clk);
-    stall <= 0; repeat (9) @(posedge clk);
+    send_stall <= 1; repeat (5) @(posedge clk);
+    send_stall <= 0; repeat (9) @(posedge clk);
     // test sending DATA
     $display("SENDING DATA = CAFEBABEDEADBEEF");
-    pid_in <= 8'b1100_0011; data_in <= 64'hCAFEBABEDEADBEEF;
+    pkt_out.pid <= 8'b1100_0011; pkt_out.data <= 64'hCAFEBABEDEADBEEF;
     pkt_avail <= 1;
     @(posedge clk);
     pkt_avail <= 0;
     repeat (97) @(posedge clk);
     // test sending ACK
     $display("SENDING ACK");
-    pid_in <= 8'b1101_0010;
+    pkt_out.pid <= 8'b1101_0010;
     pkt_avail <= 1;
     @(posedge clk);
     pkt_avail <= 0;
@@ -68,22 +65,19 @@ endmodule
 // test bse + bitstuffing + nrzi
 module big_tb;
   logic clk, rst_L;
-  logic pkt_avail;
-  logic [7:0]  pid_in;
-  logic [6:0]  addr_in;
-  logic [3:0]  endp_in;
-  logic [63:0] data_in;
-  logic        stall;
-  logic        start, last;
-  logic        raw_bit_stream, stuffed_bit_stream, stream_out;
+  bit   pkt_avail, pkt_sent;
+  pkt_t pkt_out;
+  bit   send_stall;
+  bit   send_start, send_last;
+  bit   send_raw_bit_stream, send_stuffed_bit_stream, stream_out;
   usbWires wires();
-
 
   logic [109:0]  result;   // largest is SYNC + PID + DATA0 + CRC16
 
-  bitStreamEncoder dut0(.*, .bit_out(raw_bit_stream));
-  bitStuffer dut1(.*, .bit_in(raw_bit_stream), .bit_out(stuffed_bit_stream));
-  nrzi dut2(.*, .bit_stream(stuffed_bit_stream));
+  bitStreamEncoder dut0(.*, .bit_out(send_raw_bit_stream));
+  bitStuffer dut1(.*, .bit_in(send_raw_bit_stream),
+                      .bit_out(send_stuffed_bit_stream));
+  nrzi dut2(.*, .bit_stream(send_stuffed_bit_stream));
   dpdm d1(.*);
   clock c1(.*);
 
@@ -100,12 +94,13 @@ module big_tb;
 
   initial begin
     rst_L = 0; @(posedge clk);
-    pid_in <= 0; addr_in <= 0; endp_in <= 0; data_in <= 0; pkt_avail <= 0;
+    pkt_out.pid <= 0; pkt_out.addr <= 0; pkt_out.endp <= 0; pkt_out.data <= 0;
+    pkt_avail <= 0;
     rst_L <= 1; @(posedge clk);
     // test sending OUT to endpoint 4, data = CAFEBABEDEADBEEF
     $monitor($time,, "stall = %b, start = %b, last = %b, result = %h",
-                      stall, start, last, result);
-    pid_in <= 8'b1110_0001; addr_in <= 5; endp_in <= 4;
+                      send_stall, send_start, send_last, result);
+    pkt_out.pid <= 8'b1110_0001; pkt_out.addr <= 5; pkt_out.endp <= 4;
     pkt_avail <= 1;
     $display("SENDING OUT to endpoint 4");
     @(posedge clk);
@@ -113,14 +108,14 @@ module big_tb;
     repeat (40) @(posedge clk);
     // test sending DATA
     $display("SENDING DATA = CAFEBABEDEADBEEF");
-    pid_in <= 8'b1100_0011; data_in <= 64'hCAFEBABEDEADBEEF;
+    pkt_out.pid <= 8'b1100_0011; pkt_out.data <= 64'hCAFEBABEDEADBEEF;
     pkt_avail <= 1;
     @(posedge clk);
     pkt_avail <= 0;
     repeat (110) @(posedge clk);
     // test sending ACK
     $display("SENDING ACK");
-    pid_in <= 8'b1101_0010;
+    pkt_out.pid <= 8'b1101_0010;
     pkt_avail <= 1;
     @(posedge clk);
     pkt_avail <= 0;
@@ -134,40 +129,40 @@ endmodule
 module bitStuffer_tb;
   logic clk, rst_L;
   logic pkt_avail;
-  logic start;
-  logic last;
+  logic send_start;
+  logic send_last;
   logic bit_in;
   logic bit_out;
-  logic stall;
+  logic send_stall;
 
   bitStuffer dut(.*);
   clock c1(.*);
 
   initial begin
     $monitor($time,, "bit_in = %b, bit_out = %b, stall = %b",
-                      bit_in, bit_out, stall);
+                      bit_in, bit_out, send_stall);
     rst_L <= 0; @(posedge clk);
     rst_L <= 1;
-    start <= 0; last <= 0;
+    send_start <= 0; send_last <= 0;
     // test some sequence: 011001111111111
     // should get:         0110011111101111
-    bit_in <= 0;  start <= 1; @(posedge clk);
-    bit_in <= 1;  start <= 0; @(posedge clk);
+    bit_in <= 0;  send_start <= 1; @(posedge clk);
+    bit_in <= 1;  send_start <= 0; @(posedge clk);
     bit_in <= 1; @(posedge clk);
     bit_in <= 0; @(posedge clk);
     bit_in <= 0; @(posedge clk);
     repeat (6) begin bit_in <= 1; @(posedge clk); end
     @(posedge clk);
     repeat (3) begin bit_in <= 1; @(posedge clk); end
-    bit_in <= 1;  last <= 1; @(posedge clk);
-    last <= 0; @(posedge clk);
+    bit_in <= 1;  send_last <= 1; @(posedge clk);
+    send_last <= 0; @(posedge clk);
     $finish;
   end
 
 endmodule
 
 module nrzi_tb;
-  logic bit_stream, pkt_avail, last;
+  logic bit_stream, pkt_avail, send_last;
   logic clk, rst_L;
   logic stream_out;
 
@@ -199,7 +194,7 @@ module nrzi_tb;
 endmodule: nrzi_tb
 
 module dpdm_tb;
-  logic stream_out, pkt_avail, last;
+  logic stream_out, pkt_avail, send_last;
   logic clk, rst_L;
   usbWires wires();
 
@@ -209,13 +204,13 @@ module dpdm_tb;
   initial begin
     $monitor($time,, "s_out = %b, pkt_avail = %b, en = %b, last = %b, \
 rst_L = %b, dm = %b, dp = %b, state = %s", stream_out, pkt_avail, dpdm1.en, 
-      last, rst_L, wires.DM, wires.DP, dpdm1.DPDM_state);
+      send_last, rst_L, wires.DM, wires.DP, dpdm1.DPDM_state);
     @(posedge clk);
     rst_L <= 1'b0;
     @(posedge clk);
     rst_L <= 1'b1;
     pkt_avail <= 1'b1;
-    last <= 0;
+    send_last <= 0;
     @(posedge clk);
     pkt_avail <= 0;
     repeat (5) begin
@@ -225,7 +220,7 @@ rst_L = %b, dm = %b, dp = %b, state = %s", stream_out, pkt_avail, dpdm1.en,
       @(posedge clk);
     end
     @(posedge clk);
-    last <= 1;
+    send_last <= 1;
     repeat (6) @(posedge clk);
     $finish;
   end
