@@ -197,6 +197,93 @@ module big_tb;
 
 endmodule
 
+// test receiving stuff
+module big2_tb;
+  logic clk, rst_L;
+  // sender
+  bit   pkt_avail, pkt_sent;
+  pkt_t pkt_out;
+  bit   send_stall;
+  bit   send_start, send_last;
+  bit   send_raw_bit_stream, send_stuffed_bit_stream, stream_out;
+  usbWires wires();
+  // receiver
+  bit   ack, pkt_rcvd, pkt_ok;
+  pkt_t pkt_in;
+  bit   rcv_stall;
+  bit   rcv_start, rcv_last;
+  bit   rcv_raw_bit_stream, rcv_stuffed_bit_stream, stream_in;
+  bit   EOP_ok, bit_stuff_ok, sending;
+
+
+  // sender
+  bitStreamEncoder dut0(.*, .bit_out(send_raw_bit_stream));
+  bitStuffer dut1(.*, .bit_in(send_raw_bit_stream),
+                      .bit_out(send_stuffed_bit_stream));
+  nrzi dut2(.*, .bit_stream(send_stuffed_bit_stream));
+  dpdm d1(.*, .stream_in(), .EOP_ok(), .sending(), .rcv_last(), .ack());
+  clock c1(.*);
+
+  // receiver
+  bitStreamDecoder dut3(.*, .bit_in(rcv_raw_bit_stream));
+  bitUnstuffer dut4(.*, .bit_in(rcv_stuffed_bit_stream),
+                        .bit_out(rcv_raw_bit_stream));
+  nrzi_dec dut5(.*, .bit_stream(rcv_stuffed_bit_stream));
+  dpdm d2(.*, .stream_out(), .pkt_avail(), .send_last(), .pkt_sent());
+
+  initial begin
+    rst_L = 0; @(posedge clk);
+    pkt_out.pid <= 0; pkt_out.addr <= 0; pkt_out.endp <= 0; pkt_out.data <= 0;
+    pkt_avail <= 0;
+    rst_L <= 1; @(posedge clk);
+    // test sending OUT to endpoint 4, data = CAFEBABEDEADBEEF
+    $monitor($time,, "stall = %b, start = %b, last = %b",
+                      send_stall, send_start, send_last);
+    pkt_out.pid <= 8'b1110_0001; pkt_out.addr <= 5; pkt_out.endp <= 4;
+    pkt_avail <= 1;
+    $display("SENDING OUT to endpoint 4");
+    @(posedge clk);
+    pkt_avail <= 0;
+    repeat (40) @(posedge clk);
+    ack <= 1; @(posedge clk); ack <= 0;
+    assert(pkt_in.pid == 8'b1110_0001);
+    assert(pkt_in.addr == 5);
+    assert(pkt_in.endp == 4);
+    assert(pkt_rcvd);
+    assert(pkt_ok);
+    $display("passed OUT test");
+    // test sending DATA
+    $display("SENDING DATA = CAFEBABEDEADBEEF");
+    pkt_out.pid <= 8'b1100_0011; pkt_out.data <= 64'hCAFEBABEDEADBEEF;
+    pkt_avail <= 1;
+    @(posedge clk);
+    pkt_avail <= 0;
+    repeat (110) @(posedge clk);
+    ack <= 1; @(posedge clk); ack <= 0;
+    assert(pkt_in.pid == 8'b1100_0011);
+    assert(pkt_in.data == 64'hCAFEBABEDEADBEEF);
+    assert(pkt_rcvd);
+    assert(pkt_ok);
+    $display("passed DATA test");
+    // test sending ACK
+    $display("SENDING ACK");
+    pkt_out.pid <= 8'b1101_0010;
+    pkt_avail <= 1;
+    @(posedge clk);
+    pkt_avail <= 0;
+    repeat (17) @(posedge clk);
+    ack <= 1; @(posedge clk); ack <= 0;
+    assert(pkt_in.pid == 8'b1101_0010);
+    assert(pkt_rcvd);
+    assert(pkt_ok);
+    $display("passed ACK test");
+    @(posedge clk);
+    $finish;
+  end
+
+endmodule
+
+
 // test bit stuffing
 module bitStuffer_tb;
   logic clk, rst_L;

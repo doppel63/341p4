@@ -257,11 +257,36 @@ module bitStreamDecoder(
 
   // comb logic for some outputs
   always_comb begin
-    pkt_ok = bit_stuff_ok & EOP_ok & state == DONE &
-            (crc5_ok | crc16_ok | pkt_in.pid == ACK | pkt_in.pid == NAK);
     crc5_en = state == ADDR || state == ENDP || state == CRC5;
     crc16_en = state == DATA || state == CRC16;
-    pkt_rcvd = state == DONE;
+    // start unstuffing bits after PID
+    rcv_start = pid_cnt == 7;
+    // last bit to check for unstuffing on last bit of crc5, crc16 or pid
+    rcv_last = ~rcv_stall & (crc5_done | crc16_done |
+                            (pid == PID && pid_cnt == 7));
+  end
+
+  // FF to hold pkt_ok. pkt is ok until ack is seen because pkt does not change
+  // while in the DONE state
+  always_ff @(posedge clk, negedge rst_L) begin
+    if (~rst_L)
+      pkt_ok <= 0;
+    else if (ack)
+      pkt_ok <= 0;
+    else if (bit_stuff_ok & EOP_ok & state == DONE &
+            (crc5_ok | crc16_ok | pkt_in.pid == ACK | pkt_in.pid == NAK))
+      pkt_ok <= 1;
+  end
+
+  // pkt_rcvd also in a FF to delay it by 1 clock cycle so that the crc
+  // receivers have time to check if the crc is ok
+  always_ff @(posedge clk, negedge rst_L) begin
+    if (~rst_L)
+      pkt_rcvd <= 0;
+    else if (ack)
+      pkt_rcvd <= 0;
+    else if (state == DONE)
+      pkt_rcvd <= 1;
   end
 
   // FSM
@@ -641,8 +666,8 @@ module crc5Receiver(
       DONE: begin
               done = 1;
               cnt_clr = 1;
-              crc_clr = (ack) ? 1 : 0;
-              ns = (ack) ? BODY : DONE;
+              crc_clr = 1;
+              ns = BODY;
             end
     endcase
   end
@@ -713,8 +738,8 @@ module crc16Receiver(
       DONE: begin
               done = 1;
               cnt_clr = 1;
-              crc_clr = (ack) ? 1 : 0;
-              ns = (ack) ? BODY : DONE;
+              crc_clr = 1;
+              ns = BODY;
             end
     endcase
   end
@@ -805,7 +830,8 @@ module bitUnstuffer(
     else begin
       case (state)
         IDLE:     state <= (rcv_start) ? COUNTING : IDLE;
-        COUNTING: state <= (cnt == 5 && bit_in) ? STALL : COUNTING;
+        COUNTING: state <= (rcv_last) ? IDLE : 
+                           ((cnt == 5 && bit_in) ? STALL : COUNTING);
         STALL:    if (~bit_in)
                     state <= (rcv_last) ? IDLE : COUNTING;
                   else
@@ -845,7 +871,7 @@ module nrzi(
     else begin
       nrzi_state <= next_nrzi_state;
       if (nrzi_state == RUN)
-        prev_bit <= (bit_stream) ? prev_bit : ~prev_bit;
+        prev_bit <= (send_last) ? 1 : ((bit_stream) ? prev_bit : ~prev_bit);
     end
   end
 
@@ -916,8 +942,8 @@ module dpdm(
   assign wires.DM = (en) ? en_dm : 1'bz;
   assign dp = wires.DP;
   assign dm = wires.DM;
-  // incoming bit stream is 1 if J, 0 if K or SE0
-  assign stream_in = (dp & ~dm) ? 1'b1 : 1'b0;
+  // incoming bit stream is 0 if K, 1 if J or SE0
+  assign stream_in = (~dp & dm) ? 1'b0 : 1'b1;
   
   enum    bit [3:0] {IDLE, PACKET, SEOP1, SEOP2, SEOP3, REOP1, REOP2, REOP3, ERROR
                   } DPDM_state, next_DPDM_state;
