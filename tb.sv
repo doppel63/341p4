@@ -206,6 +206,7 @@ module big2_tb;
   bit   send_stall;
   bit   send_start, send_last;
   bit   send_raw_bit_stream, send_stuffed_bit_stream, stream_out;
+  bit   invalid_input;
   usbWires wires();
   // receiver
   bit   ack, pkt_rcvd, pkt_ok;
@@ -221,7 +222,8 @@ module big2_tb;
   bitStuffer dut1(.*, .bit_in(send_raw_bit_stream),
                       .bit_out(send_stuffed_bit_stream));
   nrzi dut2(.*, .bit_stream(send_stuffed_bit_stream));
-  dpdm d1(.*, .stream_in(), .EOP_ok(), .sending(), .rcv_last(), .ack());
+  dpdm d1(.*, .stream_in(), .EOP_ok(), .sending(), .rcv_last(), .ack(),
+          .invalid_input());
   clock c1(.*);
 
   // receiver
@@ -233,32 +235,31 @@ module big2_tb;
 
   initial begin
     rst_L = 0; @(posedge clk);
-    pkt_out.pid <= 0; pkt_out.addr <= 0; pkt_out.endp <= 0; pkt_out.data <= 0;
+    pkt_out.pid <= PID_OUT;
+    pkt_out.addr <= 0; pkt_out.endp <= 0; pkt_out.data <= 0;
     pkt_avail <= 0;
     rst_L <= 1; @(posedge clk);
-    // test sending OUT to endpoint 4, data = CAFEBABEDEADBEEF
-    $monitor($time,, "stall = %b, start = %b, last = %b",
-                      send_stall, send_start, send_last);
-    pkt_out.pid <= 8'b1110_0001; pkt_out.addr <= 5; pkt_out.endp <= 4;
-    pkt_avail <= 1;
+    // test sending OUT to endpoint 4
     $display("SENDING OUT to endpoint 4");
+    pkt_out.pid <= PID_OUT; pkt_out.addr <= 5; pkt_out.endp <= 4;
+    pkt_avail <= 1;
     @(posedge clk);
     pkt_avail <= 0;
-    repeat (40) @(posedge clk);
+    wait(pkt_rcvd);
     ack <= 1; @(posedge clk); ack <= 0;
-    assert(pkt_in.pid == 8'b1110_0001);
+    assert(pkt_in.pid == PID_OUT);
     assert(pkt_in.addr == 5);
     assert(pkt_in.endp == 4);
     assert(pkt_rcvd);
     assert(pkt_ok);
     $display("passed OUT test");
-    // test sending DATA
+    // test sending DATA, data = CAFEBABEDEADBEEF
     $display("SENDING DATA = CAFEBABEDEADBEEF");
-    pkt_out.pid <= 8'b1100_0011; pkt_out.data <= 64'hCAFEBABEDEADBEEF;
+    pkt_out.pid <= PID_DATA; pkt_out.data <= 64'hCAFEBABEDEADBEEF;
     pkt_avail <= 1;
     @(posedge clk);
     pkt_avail <= 0;
-    repeat (110) @(posedge clk);
+    wait(pkt_rcvd);
     ack <= 1; @(posedge clk); ack <= 0;
     assert(pkt_in.pid == 8'b1100_0011);
     assert(pkt_in.data == 64'hCAFEBABEDEADBEEF);
@@ -267,16 +268,104 @@ module big2_tb;
     $display("passed DATA test");
     // test sending ACK
     $display("SENDING ACK");
-    pkt_out.pid <= 8'b1101_0010;
+    pkt_out.pid <= PID_ACK;
     pkt_avail <= 1;
     @(posedge clk);
     pkt_avail <= 0;
-    repeat (17) @(posedge clk);
+    wait(pkt_rcvd);
     ack <= 1; @(posedge clk); ack <= 0;
-    assert(pkt_in.pid == 8'b1101_0010);
+    assert(pkt_in.pid == PID_ACK);
     assert(pkt_rcvd);
     assert(pkt_ok);
     $display("passed ACK test");
+    
+    // check errors
+    // test bad bit stuffing (got a 1 instead of 0)
+    $display("SENDING DATA = CAFEBABEDEADBEEF with bad bit stuff");
+    pkt_out.pid <= PID_DATA; pkt_out.data <= 64'hCAFEBABEDEADBEEF;
+    pkt_avail <= 1;
+    @(posedge clk);
+    pkt_avail <= 0;
+    wait(dut1.cnt == 5 && dut1.bit_in)
+      @(posedge clk);
+      force dut1.bit_out = 1;
+    wait(pkt_rcvd);
+    ack <= 1; @(posedge clk); ack <= 0;
+    assert(pkt_in.pid == PID_DATA);
+    assert(pkt_rcvd);
+    assert(~pkt_ok);
+    $display("passed bad bit stuffing test");
+    release dut1.bit_out;
+    // test badly formed EOP
+    $display("SENDING ACK with bad EOP");
+    pkt_out.pid <= PID_ACK;
+    pkt_avail <= 1;
+    @(posedge clk);
+    pkt_avail <= 0;
+    @(posedge clk);
+    wait(~d1.en_dp & ~d1.en_dm)
+      @(posedge clk);
+      force d1.en_dp = 1;
+    wait(pkt_rcvd);
+    ack <= 1; @(posedge clk); ack <= 0;
+    assert(pkt_in.pid == 8'b1101_0010);
+    assert(pkt_rcvd);
+    assert(~pkt_ok);
+    $display("passed bad EOP test");
+    release d1.en_dp;
+    // test bad PID
+    $display("SENDING BAD PID");
+    pkt_out.pid <= PID_ACK;
+    force pkt_out.pid[0] = 1;
+    pkt_avail <= 1;
+    @(posedge clk);
+    pkt_avail <= 0;
+    wait(pkt_rcvd);
+    ack <= 1; @(posedge clk); ack <= 0;
+    assert(pkt_rcvd);
+    assert(~pkt_ok);
+    $display("passed bad PID test");
+    release pkt_out.pid[0];
+    // test bad crc
+    $display("SENDING OUT to endpoint 4 with corrupted bits");
+    pkt_out.pid <= PID_OUT; pkt_out.addr <= 5; pkt_out.endp <= 4;
+    pkt_avail <= 1;
+    @(posedge clk);
+    pkt_avail <= 0;
+    wait(dut3.pid_cnt == 7)
+      repeat (2) @(posedge clk);
+      force dut3.bit_in = 0;
+      @(posedge clk);
+      release dut3.bit_in;
+    wait(pkt_rcvd);
+    ack <= 1; @(posedge clk); ack <= 0;
+    assert(pkt_in.pid == PID_OUT);
+    assert(pkt_in.addr == 4);
+    assert(pkt_in.endp == 4);
+    assert(pkt_rcvd);
+    assert(~pkt_ok);
+    $display("passed bad CRC test");
+    // test invalid inputs on the dpdm wires
+    $display("SENDING OUT to endpoint 4 with bad DPDM wires");
+    pkt_out.pid <= PID_OUT; pkt_out.addr <= 5; pkt_out.endp <= 4;
+    pkt_avail <= 1;
+    @(posedge clk);
+    pkt_avail <= 0;
+    wait(dut3.pid_cnt == 7)
+      repeat (2) @(posedge clk);
+      force wires.DP = 1;
+      force wires.DM = 1;
+      @(posedge clk);
+      release wires.DP;
+      release wires.DM;
+    wait(pkt_rcvd);
+    ack <= 1; @(posedge clk); ack <= 0;
+    assert(pkt_in.pid == PID_OUT);
+    assert(pkt_rcvd);
+    assert(~pkt_ok);
+    $display("passed bad DPDM test");
+
+    
     @(posedge clk);
     $finish;
   end

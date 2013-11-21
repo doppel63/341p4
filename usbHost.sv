@@ -5,8 +5,12 @@
  * November 14, 2013
  */
 
+typedef enum bit [7:0] {PID_OUT = 8'b1110_0001, PID_IN = 8'b0110_1001,
+                        PID_DATA = 8'b1100_0011,
+                        PID_ACK = 8'b1101_0010, PID_NAK = 8'b0101_1010} pid_t;
+
 typedef struct packed {
-  bit [7:0]   pid;
+  pid_t       pid;
   bit [6:0]   addr;
   bit [3:0]   endp;
   bit [63:0]  data;
@@ -28,6 +32,7 @@ module usbHost(
   bit   pkt_avail, pkt_sent;
   bit   send_stall, send_start, send_last;
   bit   send_raw_bit_stream, send_stuffed_bit_stream, stream_out;
+  bit   invalid_input;
 
   bitStreamEncoder bse1(.*, .bit_out(send_raw_bit_stream));
   bitStuffer bs1(.*, .bit_in(send_raw_bit_stream),
@@ -37,8 +42,14 @@ module usbHost(
   // this stuff handles bit-level protocols for receiving a packet
   pkt_t pkt_in;
   bit   pkt_rcvd, pkt_ok, ack;
-  bit   EOP_ok, sending, rcv_last;
-  bit   stream_in;
+  bit   rcv_stall, rcv_start, rcv_last;
+  bit   EOP_ok, bit_stuff_ok, sending;
+  bit   rcv_raw_bit_stream, rcv_stuffed_bit_stream, stream_in;
+
+  bitStreamDecoder bsd1(.*, .bit_in(rcv_raw_bit_stream));
+  bitUnstuffer bu1(.*, .bit_in(rcv_stuffed_bit_stream),
+                       .bit_out(rcv_raw_bit_stream));
+  nrzi_dec nd1(.*, .bit_stream(rcv_stuffed_bit_stream));
 
   // dpdm is linked to both parts
   dpdm d1(.*);
@@ -88,7 +99,7 @@ module protocolFSM(
   input   logic [63:0] data_in, // from R/W FSM
   output  logic       pkt_avail,
   output  pkt_t       pkt_out,
-  output  logic [63:0] data_out       // to R/W FSM
+  output  logic [63:0] data_out,       // to R/W FSM
   output  logic       protocol_avail); // to R/W FSM
 
   //enum stuff here
@@ -260,8 +271,8 @@ module protocolFSM(
                     end
                   end
                 endcase
-    end            
   end
+endmodule: protocolFSM
 
 
 
@@ -296,9 +307,11 @@ module bitStreamEncoder(
   bit [5:0]           data_cnt;
   bit [2:0]           crc5_cnt;
   bit [3:0]           crc16_cnt;
+  bit [1:0]           done_cnt;
 
   // states for FSM
-  enum    bit [2:0] {IDLE, SYNC, PID, ADDR, ENDP, CRC5, DATA, CRC16} state;
+  enum    bit [3:0] {IDLE, SYNC, PID, ADDR, ENDP, CRC5, DATA, CRC16, DONE
+                      } state;
 
   // instantiate counters datapath as registers for holding stuff
   counter #(8)  pidReg(.clk(clk), .rst_L(rst_L), .clr(), .ld(pkt_avail), .en(),
@@ -345,7 +358,7 @@ module bitStreamEncoder(
     // last signal asserted when on the last bit of crc5, crc16 or pid depending
     // on packet AND not stalling for bit stuffing
     send_last = ~send_stall && ((crc5_cnt == 4) || (crc16_cnt == 15) ||
-                (pid == PID && pid_cnt == 7));
+                ((pid == ACK || pid == NAK) && pid_cnt == 7));
   end
 
   always_ff @(posedge clk, negedge rst_L) begin
@@ -357,6 +370,7 @@ module bitStreamEncoder(
       data_cnt <= 0;
       crc5_cnt <= 0;
       crc16_cnt <= 0;
+      done_cnt <= 0;
       state <= IDLE;
     end
     else if (~send_stall) begin
@@ -379,7 +393,8 @@ module bitStreamEncoder(
                     case (pid)
                       IN, OUT:  state <= ADDR;
                       DATA0:    state <= DATA;
-                      default:  state <= IDLE;
+                      ACK, NAK: state <= DONE;
+                      default:  state <= DONE;
                     endcase
                    end
                 end
@@ -393,7 +408,7 @@ module bitStreamEncoder(
                 end
         CRC5:   begin
                   crc5_cnt <= (crc5_cnt < 4) ? crc5_cnt + 1 : 0;
-                  state <= (crc5_cnt < 4) ? CRC5 : IDLE;
+                  state <= (crc5_cnt < 4) ? CRC5 : DONE;
                 end
         DATA:   begin
                   data_cnt <= (data_cnt < 63) ? data_cnt + 1 : 0;
@@ -401,7 +416,11 @@ module bitStreamEncoder(
                 end
         CRC16:  begin
                   crc16_cnt <= (crc16_cnt < 15) ? crc16_cnt + 1 : 0;
-                  state <= (crc16_cnt < 15) ? CRC16 : IDLE;
+                  state <= (crc16_cnt < 15) ? CRC16 : DONE;
+                end
+        DONE:   begin
+                  done_cnt <= (done_cnt < 2) ? done_cnt + 1 : 0;
+                  state <= (done_cnt < 2) ? DONE : IDLE;
                 end
       endcase
     end
@@ -412,7 +431,7 @@ module bitStreamDecoder(
   input   logic clk, rst_L,
   // to rest of receiver stuff
   input   bit   bit_in, rcv_stall,
-  input   bit   bit_stuff_ok, EOP_ok,
+  input   bit   bit_stuff_ok, EOP_ok, invalid_input,
   output  bit   rcv_start, rcv_last,
   // to protocol FSM
   input   bit   ack,
@@ -422,17 +441,17 @@ module bitStreamDecoder(
   // internal wires
   enum    bit [7:0]  {OUT = 8'b1110_0001, IN = 8'b0110_1001,
                       DATA0 = 8'b1100_0011,
-                      ACK = 8'b1101_0010, NAK = 8'b0101_1010} pid;
+                      ACK = 8'b1101_0010, NAK = 8'b0101_1010} next_pid;
   bit crc5_en, crc5_done, crc5_ok;
   bit crc16_en, crc16_done, crc16_ok;
 
   // implicit registers for counting stuff
   bit [2:0] sync_cnt, pid_cnt, addr_cnt;
-  bit [1:0] endp_cnt;
+  bit [1:0] endp_cnt, done_cnt;
   bit [5:0] data_cnt;
 
   // states for FSM
-  enum    bit [2:0] {WAIT, PID, ADDR, ENDP, CRC5, DATA, CRC16, DONE} state;
+  enum bit [3:0] {WAIT, PID, ADDR, ENDP, CRC5, DATA, CRC16, EOP, DONE} state;
 
   crc5Receiver crc5Rcv(.en(~rcv_stall & crc5_en), .msg_in(bit_in),
                        .done(crc5_done), .OK(crc5_ok), .msg(), .*);
@@ -441,45 +460,54 @@ module bitStreamDecoder(
 
   // comb logic for some outputs
   always_comb begin
+    next_pid = {bit_in, pkt_in.pid[6:0]};
     crc5_en = state == ADDR || state == ENDP || state == CRC5;
     crc16_en = state == DATA || state == CRC16;
+    pkt_rcvd = state == DONE;
     // start unstuffing bits after PID
     rcv_start = pid_cnt == 7;
     // last bit to check for unstuffing on last bit of crc5, crc16 or pid
     rcv_last = ~rcv_stall & (crc5_done | crc16_done |
-                            (pid == PID && pid_cnt == 7));
+               ((next_pid == ACK || next_pid == NAK) && pid_cnt == 7));
   end
 
   // FF to hold pkt_ok. pkt is ok until ack is seen because pkt does not change
   // while in the DONE state
   always_ff @(posedge clk, negedge rst_L) begin
     if (~rst_L)
-      pkt_ok <= 0;
-    else if (ack)
-      pkt_ok <= 0;
-    else if (bit_stuff_ok & EOP_ok & state == DONE &
-            (crc5_ok | crc16_ok | pkt_in.pid == ACK | pkt_in.pid == NAK))
       pkt_ok <= 1;
-  end
-
-  // pkt_rcvd also in a FF to delay it by 1 clock cycle so that the crc
-  // receivers have time to check if the crc is ok
-  always_ff @(posedge clk, negedge rst_L) begin
-    if (~rst_L)
-      pkt_rcvd <= 0;
     else if (ack)
-      pkt_rcvd <= 0;
-    else if (state == DONE)
-      pkt_rcvd <= 1;
+      pkt_ok <= 1;
+    else if (~bit_stuff_ok | ~EOP_ok | (state == EOP & (~crc5_ok | ~crc16_ok)))
+      pkt_ok <= 0;  // parts of the receiver detect an error
+    else if (invalid_input & (state == PID | state == ADDR | state == ENDP |
+                              state == CRC5 | state == DATA | state == CRC16))
+      pkt_ok <= 0;  // dpdm detects invalid combination of dp and dm
+    else if (state == EOP & ~(pkt_in.pid == IN | pkt_in.pid == OUT |
+                              pkt_in.pid == DATA0 |
+                              pkt_in.pid == ACK | pkt_in.pid == NAK))
+      pkt_ok <= 0;  // invalid pid
   end
 
   // FSM
   always_ff @(posedge clk, negedge rst_L) begin
     if (~rst_L) begin
       state <= WAIT;
+      sync_cnt <= 0;
+      pid_cnt <= 0;
+      addr_cnt <= 0;
+      endp_cnt <= 0;
+      data_cnt <= 0;
+      done_cnt <= 0;
     end
     else if (ack) begin
       state <= WAIT;
+      sync_cnt <= 0;
+      pid_cnt <= 0;
+      addr_cnt <= 0;
+      endp_cnt <= 0;
+      data_cnt <= 0;
+      done_cnt <= 0;
     end
     else if (~rcv_stall) begin
       case (state)
@@ -501,10 +529,11 @@ module bitStreamDecoder(
                   end
                   else begin
                     pid_cnt <= 0;
-                    case ({bit_in, pkt_in.pid[6:0]})
+                    case (next_pid)
                       IN, OUT:  state <= ADDR;
                       DATA0:    state <= DATA;
-                      default:  state <= DONE;
+                      ACK, NAK: state <= EOP;
+                      default:  state <= EOP;
                     endcase
                   end
                 end
@@ -519,7 +548,7 @@ module bitStreamDecoder(
                   state <= (endp_cnt < 3) ? ENDP : CRC5;
                 end
         CRC5:   begin
-                  state <= (crc5_done) ? DONE : CRC5;
+                  state <= (crc5_done) ? EOP : CRC5;
                 end
         DATA:   begin
                   pkt_in.data[data_cnt] <= bit_in;
@@ -527,7 +556,11 @@ module bitStreamDecoder(
                   state <= (data_cnt < 63) ? DATA : CRC16;
                 end
         CRC16:  begin
-                  state <= (crc16_done) ? DONE : CRC16;
+                  state <= (crc16_done) ? EOP : CRC16;
+                end
+        EOP:    begin
+                  done_cnt <= (done_cnt < 2) ? done_cnt + 1 : 0;
+                  state <= (done_cnt < 2) ? EOP : DONE;
                 end
         DONE:   begin
                   state <= (ack) ? WAIT : DONE;
@@ -808,6 +841,152 @@ module crc5Receiver(
   bit [3:0]           cnt;
 
   enum    bit [1:0] {BODY, REM, DONE} cs, ns;
+
+  crc5Calc calc(clk, rst_L, en, crc_clr, msg_in, crc_out);
+  shiftReg rcvd(clk, rst_L, , en && rcv_en, msg_in, msg);
+  counter msgCnt(clk, rst_L, cnt_clr, , en && cnt_en, cnt_up, , cnt);
+
+  assign OK = cs != DONE || crc_out == 5'b01100;
+
+  // FSM state logic
+  always_ff @(posedge clk, negedge rst_L) begin
+    if (~rst_L)
+      cs <= BODY;
+    else if (ack)
+      cs <= BODY;
+    else if (en)
+      cs <= ns;
+  end
+
+  // Next state and output logic
+  always_comb begin
+    crc_clr = 0;
+    cnt_clr = 0; cnt_en = 0; cnt_up = 0;
+    rcv_en = 0;
+    done = 0;
+    ns = cs;
+    case (cs)
+      BODY: begin
+              cnt_en = (cnt != 10) ? 1 : 0;
+              cnt_up = (cnt != 10) ? 1 : 0;
+              cnt_clr = (cnt != 10) ? 0 : 1;
+              rcv_en = 1;
+              ns = (cnt != 10) ? BODY : REM;
+            end
+      REM:  begin
+              cnt_en = 1;
+              cnt_up = 1;
+              cnt_clr = (cnt != 4) ? 0 : 1;
+              done = (cnt != 4) ? 0 : 1;
+              ns = (cnt != 4) ? REM : DONE;
+            end
+      DONE: begin
+              //done = 1;
+              cnt_clr = (ack) ? 1 : 0;
+              crc_clr = (ack) ? 1 : 0;
+              ns = (ack) ? BODY : DONE;
+            end
+    endcase
+  end
+  /*
+  always @(posedge done)
+    #1 $display("msg received! msg: %b, OK = %b", msg, OK);
+  */
+endmodule: crc5Receiver
+
+
+/**********************
+ *    CRC16RECEIVER   *
+ **********************
+ * Module that receives values from the CRC16 calculator.
+ */
+module crc16Receiver(
+  input   logic       clk, rst_L,
+  input   bit         en, msg_in, ack,
+  output  bit         done, OK,
+  output  bit [63:0]  msg);
+
+  bit [15:0]          crc_out;
+  bit                 rcv_en;
+  bit                 crc_clr;
+  bit                 cnt_clr, cnt_en, cnt_up;
+  bit [6:0]           cnt;
+
+  enum bit [1:0] {BODY, REM, DONE} cs, ns;
+
+  crc16Calc calc(clk, rst_L, en, crc_clr, msg_in, crc_out);
+  shiftReg #(64) rcvd(clk, rst_L, , en && rcv_en, msg_in, msg);
+  counter #(7) msgCnt(clk, rst_L, cnt_clr, , en && cnt_en, cnt_up, , cnt);
+
+  assign OK = cs != DONE || crc_out == 16'h800D;
+
+  // FSM state logic
+  always_ff @(posedge clk, negedge rst_L) begin
+    if (~rst_L)
+      cs <= BODY;
+    else if (ack)
+      cs <= BODY;
+    else if (en)
+      cs <= ns;
+  end
+
+  // Next state and output logic
+  always_comb begin
+    crc_clr = 0;
+    cnt_clr = 0; cnt_en = 0; cnt_up = 0;
+    rcv_en = 0;
+    done = 0;
+    ns = cs;
+    case (cs)
+      BODY: begin
+              cnt_en = (cnt != 63) ? 1 : 0;
+              cnt_up = (cnt != 63) ? 1 : 0;
+              cnt_clr = (cnt != 63) ? 0 : 1;
+              rcv_en = 1;
+              ns = (cnt != 63) ? BODY : REM;
+            end
+      REM:  begin
+              cnt_en = 1;
+              cnt_up = 1;
+              cnt_clr = (cnt != 15) ? 0 : 1;
+              done = (cnt != 15) ? 0 : 1;
+              ns = (cnt != 15) ? REM : DONE;
+            end
+      DONE: begin
+              //done = 1;
+              cnt_clr = (ack) ? 1 : 0;
+              crc_clr = (ack) ? 1 : 0;
+              ns = (ack) ? BODY : DONE;
+            end
+    endcase
+  end
+  /*
+  always @(posedge done)
+    #1 $display("msg received! msg: %h, OK = %b", msg, OK);
+  */
+endmodule: crc16Receiver
+
+
+/*******************
+ *    BITSTUFFER   *
+ *******************
+ * When there have been six 1'b1s in a row, a 0 bit is added to the output
+ * sequence and the stall flag is toggled.
+ */
+// for stuffing bits. 
+//          NOTE: damnit linky.
+module bitStuffer(
+  input   logic       clk, rst_L,
+  input   bit         pkt_avail,
+  input   bit         send_start,
+  input   bit         send_last,
+  input   bit         bit_in,
+  output  bit         bit_out,
+  output  bit         send_stall);
+
+  bit                 clr;
+  bit [2:0]           cnt;
+
   enum    bit [1:0] {IDLE, COUNTING, STALL} state;
 
   assign bit_out = (send_stall) ? 0 : bit_in;
@@ -904,7 +1083,7 @@ module dpdm(
   input   bit         stream_out, pkt_avail, send_last,
   output  bit         pkt_sent,
   // to receiver stuff
-  output  bit         stream_in, EOP_ok, sending,
+  output  bit         stream_in, EOP_ok, sending, invalid_input,
   input   bit         rcv_last, ack,
   usbWires            wires);
 
@@ -919,6 +1098,11 @@ module dpdm(
   
   enum    bit [3:0] {IDLE, PACKET, SEOP1, SEOP2, SEOP3, REOP1, REOP2, REOP3, 
                     ERROR} DPDM_state, next_DPDM_state;
+
+  // input is invalid if we are receiving a packet but see something other than
+  // J or K
+  assign invalid_input = ~((dp & ~dm) | (~dp & dm));
+
 
   always_ff @(posedge clk, negedge rst_L)
     if (~rst_L)
