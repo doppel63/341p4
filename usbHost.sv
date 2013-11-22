@@ -111,14 +111,14 @@ module protocolFSM(
   logic               corruptEn, corruptCtr, corruptClr;
 
   //instantiate a counter c1
-  counter #(8)  timeout(.clk(clk), .rst_L(rst_L), .clr(timeoutClr), .ld(1'b1), 
-                        .en(timeoutEn), .up(1'b1), .val(1'b0), 
+  counter #(8)  timeout(.clk(clk), .rst_L(rst_L), .clr(timeoutClr), .ld(1'b1),
+                        .en(timeoutEn), .up(1'b1), .val(1'b0),
                         .cnt(timeoutCtr));
   counter #(8)  totalTimeouts(.clk(clk), .rst_L(rst_L), .clr(totalTimeoutClrs),
                         .ld(1'b1), .en(totalTimeoutEn), .up(1'b1), .val(1'b0),
                         .cnt(totalTimeoutCtr));
-  counter #(8)  corrupt(.clk(clk), .rst_L(rst_L), .clr(corruptClr), .ld(1'b1), 
-                        .en(corruptEn), .up(1'b1), .val(1'b0), 
+  counter #(8)  corrupt(.clk(clk), .rst_L(rst_L), .clr(corruptClr), .ld(1'b1),
+                        .en(corruptEn), .up(1'b1), .val(1'b0),
                         .cnt(corruptCtr));
 
   always_ff @(posedge clk or negedge rst_L) begin
@@ -179,7 +179,7 @@ module protocolFSM(
                     // if 8th time corrupt  quit
                     if (corruptCtr == 7)
                       nextProtocolState = STANDBY;
-                    else 
+                    else
                       nextProtocolState = WAIT_IN;
                   end
                   // if data's ok acknowledge and go to idle
@@ -229,7 +229,7 @@ module protocolFSM(
       WAIT_OUT2:  begin
                     if (pkt_sent)
                       nextProtocolState = OUT;
-                    else 
+                    else
                       nextProtocolState = WAIT_OUT2;
                   end
       OUT:        begin
@@ -273,7 +273,6 @@ module protocolFSM(
                 endcase
   end
 endmodule: protocolFSM
-
 
 
 /*************************
@@ -1015,6 +1014,51 @@ module bitStuffer(
   end
 endmodule: bitStuffer
 
+module bitUnstuffer(
+  input   logic clk, rst_L,
+  input   bit   ack,
+  input   bit   rcv_start,
+  input   bit   rcv_last,
+  input   bit   bit_in,
+  output  bit   bit_out,
+  output  bit   rcv_stall,
+  output  bit   bit_stuff_ok);
+
+  bit       clr;
+  bit [2:0] cnt;
+
+  enum    bit [1:0] {IDLE, COUNTING, STALL, ERROR} state;
+
+  assign bit_out = (rcv_stall) ? 0 : bit_in;
+  assign rcv_stall = state == STALL;
+  assign clr = state == IDLE;
+  assign bit_stuff_ok = state != ERROR;
+
+  counter #(3) onesCnt(.clk(clk), .rst_L(rst_L), .clr(rcv_stall|clr|~bit_in),
+                       .ld(), .en(bit_in), .up(bit_in), .val(), .cnt(cnt));
+
+  // FSM logic
+  always_ff @(posedge clk, negedge rst_L) begin
+    if (~rst_L)
+      state <= IDLE;
+    else if (ack)
+      state <= IDLE;
+    else begin
+      case (state)
+        IDLE:     state <= (rcv_start) ? COUNTING : IDLE;
+        COUNTING: state <= (rcv_last) ? IDLE : 
+                           ((cnt == 5 && bit_in) ? STALL : COUNTING);
+        STALL:    if (~bit_in)
+                    state <= (rcv_last) ? IDLE : COUNTING;
+                  else
+                    state <= ERROR;
+        default:  state <= state;
+      endcase
+    end
+  end
+
+endmodule: bitUnstuffer
+
 
 /************
  *   NRZI   *
@@ -1043,7 +1087,7 @@ module nrzi(
     else begin
       nrzi_state <= next_nrzi_state;
       if (nrzi_state == RUN)
-        prev_bit <= (bit_stream) ? prev_bit : ~prev_bit;
+        prev_bit <= (send_last) ? 1 : ((bit_stream) ? prev_bit : ~prev_bit);
     end
   end
 
@@ -1070,6 +1114,27 @@ module nrzi(
   end
 endmodule: nrzi
 
+// decodes nrzi stream if it is not an outgoing packet (~sending).
+// bit_stream is 1 if current stream_in is the same as prev_bit,
+// 0 if current stream_in is different from prev_bit.
+module nrzi_dec(
+  input   logic clk, rst_L,
+  input   bit   stream_in, sending, ack,
+  output  bit   bit_stream);
+
+  bit prev_bit;
+
+  always_ff @(posedge clk, negedge rst_L)
+    if (~rst_L)
+      prev_bit <= 1;
+    else if (ack)
+      prev_bit <= 1;
+    else
+      prev_bit <= (sending) ? 1 : stream_in;
+
+  assign bit_stream = (sending) ? 0 : ~(stream_in ^ prev_bit) ;
+
+endmodule: nrzi_dec
 
 /************
  *   DPDM   *
@@ -1093,11 +1158,11 @@ module dpdm(
   assign wires.DM = (en) ? en_dm : 1'bz;
   assign dp = wires.DP;
   assign dm = wires.DM;
-  // incoming bit stream is 1 if J, 0 if K or SE0
-  assign stream_in = (dp & ~dm) ? 1'b1 : 1'b0;
+  // incoming bit stream is 0 if K, 1 if J or SE0
+  assign stream_in = (~dp & dm) ? 1'b0 : 1'b1;
   
-  enum    bit [3:0] {IDLE, PACKET, SEOP1, SEOP2, SEOP3, REOP1, REOP2, REOP3, 
-                    ERROR} DPDM_state, next_DPDM_state;
+  enum bit [3:0] {IDLE, PACKET, SEOP1, SEOP2, SEOP3, REOP1, REOP2, REOP3, ERROR
+                  } DPDM_state, next_DPDM_state;
 
   // input is invalid if we are receiving a packet but see something other than
   // J or K

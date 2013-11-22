@@ -1,3 +1,39 @@
+// main testbench
+/*
+module test(
+  output  logic clk, rst_L);
+
+  logic [15:0]  flash_addr;
+  logic [63:0]  flash_data;
+  logic [63:0]  receivedMsg;
+  logic         success;
+
+  clock c1(.*);
+
+  initial begin
+    rst_L = 0;  @(posedge clk);
+    rst_L <= 1; @(posedge clk);
+    // check normal operation
+    // write
+    $display($time,, "Writing 64'h1234_5678_90AB_CDEF to addr 16'hABCD");
+    flash_addr = 16'hABCD;  flash_data = 64'h1234_5678_90AB_CDEF
+    host.writeData(flash_addr, flash_data, success);
+    if (success) $display("successful write!");
+    else $display($time,, "unsuccessful write");
+    // read
+    $display($time,, "Reading from addr 16'hABCD");
+    host.readData(flash_addr, receivedMsg, success);
+    if (success)
+      if (receivedMsg == flash_data) $display("successful read!");
+      else $display("successful read, but got %x instead of %x",
+                    receivedMsg, flash_data);
+    else $display($time,, "unsuccessful read");
+
+  end
+
+endmodule: tb;
+*/
+
 // test bit stream encoder
 module bitStreamEncoder_tb;
   logic         clk, rst_L;
