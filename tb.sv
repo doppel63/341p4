@@ -1,5 +1,4 @@
 // main testbench
-/*
 module test(
   output  logic clk, rst_L);
 
@@ -16,7 +15,7 @@ module test(
     // check normal operation
     // write
     $display($time,, "Writing 64'h1234_5678_90AB_CDEF to addr 16'hABCD");
-    flash_addr = 16'hABCD;  flash_data = 64'h1234_5678_90AB_CDEF
+    flash_addr = 16'hABCD;  flash_data = 64'h1234_5678_90AB_CDEF;
     host.writeData(flash_addr, flash_data, success);
     if (success) $display("successful write!");
     else $display($time,, "unsuccessful write");
@@ -29,10 +28,12 @@ module test(
                     receivedMsg, flash_data);
     else $display($time,, "unsuccessful read");
 
+    @(posedge clk);
+    $finish;
+
   end
 
-endmodule: tb;
-*/
+endmodule: test
 
 // test bit stream encoder
 module bitStreamEncoder_tb;
@@ -113,6 +114,7 @@ module bitStreamDecoder_tb;
   bit   ack;
   pkt_t pkt_in;
   bit   pkt_rcvd, pkt_ok;
+  bit   invalid_input;
 
   bitStreamEncoder dut0(.*);
   bitStreamDecoder dut1(.*);
@@ -127,7 +129,7 @@ module bitStreamDecoder_tb;
                       send_stall, send_start, send_last, pkt_in);
     send_stall <= 0; rcv_stall <= 0;
     bit_stuff_ok <= 1; EOP_ok <= 1; ack <= 0;
-    pkt_out.pid <= 8'b1110_0001; pkt_out.addr <= 5; pkt_out.endp <= 4;
+    pkt_out.pid <= PID_OUT; pkt_out.addr <= 5; pkt_out.endp <= 4;
     pkt_avail <= 1;
     $display("SENDING OUT to endpoint 4");
     @(posedge clk);
@@ -147,7 +149,7 @@ module bitStreamDecoder_tb;
     ack <= 0;
     // test sending DATA, data = CAFEBABEDEADBEEF
     $display("SENDING DATA = CAFEBABEDEADBEEF");
-    pkt_out.pid <= 8'b1100_0011; pkt_out.data <= 64'hCAFEBABEDEADBEEF;
+    pkt_out.pid <= PID_DATA; pkt_out.data <= 64'hCAFEBABEDEADBEEF;
     pkt_avail <= 1;
     @(posedge clk);
     pkt_avail <= 0;
@@ -156,7 +158,7 @@ module bitStreamDecoder_tb;
     ack <= 0;
     // test sending ACK
     $display("SENDING ACK");
-    pkt_out.pid <= 8'b1101_0010;
+    pkt_out.pid <= PID_ACK;
     pkt_avail <= 1;
     @(posedge clk);
     pkt_avail <= 0;

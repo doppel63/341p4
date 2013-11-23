@@ -65,7 +65,7 @@ module usbHost(
   task prelabRequest
   (input  bit [7:0]   data);
 
-  pkt_out.pid <= 8'b1110_0001; pkt_out.addr <= 5; pkt_out.endp <= 4;
+  pkt_out.pid <= PID_OUT; pkt_out.addr <= 5; pkt_out.endp <= 4;
   pkt_avail <= 1;
   @(posedge clk);
   pkt_avail <= 0;
@@ -80,7 +80,7 @@ module usbHost(
     input   bit [15:0]  mempage, // Page to write
     output  bit [63:0]  data, // array of bytes to write
     output  bit         success);
-
+  
   endtask: readData
 
   /* WRITEDATA */
@@ -1240,7 +1240,7 @@ endmodule: nrzi
 // 0 if current stream_in is different from prev_bit.
 module nrzi_dec(
   input   logic clk, rst_L,
-  input   bit   stream_in, sending, ack,
+  input   bit   stream_in, sending, ack, invalid_input,
   output  bit   bit_stream);
 
   bit prev_bit;
@@ -1251,7 +1251,7 @@ module nrzi_dec(
     else if (ack)
       prev_bit <= 1;
     else
-      prev_bit <= (sending) ? 1 : stream_in;
+      prev_bit <= (sending | invalid_input) ? prev_bit : stream_in;
 
   assign bit_stream = (sending) ? 0 : ~(stream_in ^ prev_bit) ;
 
@@ -1285,8 +1285,7 @@ module dpdm(
   enum bit [3:0] {IDLE, PACKET, SEOP1, SEOP2, SEOP3, REOP1, REOP2, REOP3, ERROR
                   } DPDM_state, next_DPDM_state;
 
-  // input is invalid if we are receiving a packet but see something other than
-  // J or K
+  // input is invalid if we are seeing something other than J or K
   assign invalid_input = ~((dp & ~dm) | (~dp & dm));
 
 
