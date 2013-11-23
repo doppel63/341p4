@@ -54,6 +54,9 @@ module usbHost(
   // dpdm is linked to both parts
   dpdm d1(.*);
 
+  // FSMs
+  bit   start, clear;
+
   // Tasks needed to be finished to run testbenches
 
   /* PRELABREQUEST */
@@ -92,33 +95,143 @@ module usbHost(
 
 endmodule: usbHost
 
+/*****************
+ *    R/W FSM    *
+ *****************
+ * State machine for read/write transactions.
+ *
+ * Start with an OUT transaction, always.  This sends the address to 
+ * protocolFSM.  If it is a read transaction (indicated by read), send the
+ * data from protocolFSM (data_out) to the testbench through (data_tb).  If
+ * it is a write transaction (~read), send the testbench input (write_data) to
+ * the protocolFSM (data_in).  If at any point in the protocolFSM the program
+ * is to be reset, clear is toggled and both FSMs return to the IDLE state.
+ */
+
+module rwFSM(
+  input   logic [15:0]  mempage,        // address
+  input   logic [63:0]  write_data,     // data from writeData task for WRITEs
+  input   logic [63:0]  data_out,       // data from protocolFSM (data to tb)
+  input   logic         clear,          // data from protocolFSM (handshakes)
+  input   logic         protocol_avail, // data from protocolFSM (transaction complete)
+  input   logic         read,           // exists in usbHost!!!
+  input   logic         start,
+  input   logic         clk, rst_L,
+  output  logic [63:0]  data_tb,        // data to testbench
+  output  logic         transaction,    // data to protocolFSM (1=>in)
+  output  logic [63:0]  data_in,        // data to protocolFSM
+  output  logic         send_addr);     // data to protocolFSM
+
+  enum    logic [3:0] {IDLE, OUT, OUT2, IN
+                      } RWState, nextRWState;
+
+  always_ff @(posedge clk) begin
+    if (~rst_L)
+      RWState <= IDLE;
+    else
+      RWState <= nextRWState;
+      // if clear go back to IDLE as well?
+  end
+
+  always_comb begin
+    nextRWState = RWState;
+    case (RWState)
+      IDLE:           begin
+                        if (start) begin
+                          if (~clear) begin
+                            // send address!
+                            // assume mempage and write_data from task stays on line
+                            data_in = {47'd0, mempage};
+                            transaction = 1'b0;
+                            send_addr = 1'b1;
+                            nextRWState = OUT;
+                          end
+                          else
+                            nextRWState = IDLE;
+                        end
+      end
+      OUT:            begin
+                        if (~clear) begin
+                          if (protocol_avail) // signals that protocol is done
+                            if (read) begin
+                              // send data!
+                              data_in = write_data;
+                              transaction = 1'b0;
+                              send_addr = 1'b0;
+                              nextRWState = OUT2;
+                            end
+                            else begin
+                              // receive data!
+                              transaction = 1'b1;
+                              send_addr = 1'b0;
+                              nextRWState = IN;
+                            end
+                          else
+                            nextRWState = OUT;
+                        end
+                        else
+                          nextRWState = IDLE;
+      end
+      OUT2:           begin
+                        if (~clear) begin
+                          if (protocol_avail) // signals that protocol is done
+                            nextRWState = IDLE;
+                          else
+                            nextRWState = OUT2;
+                        end
+                        else
+                          nextRWState = IDLE;
+      end
+      IN:             begin
+                        if (~clear) begin
+                          if (protocol_avail) begin
+                            data_tb = data_out; // send data from device to tb
+                            nextRWState = IDLE;
+                          end
+                          else
+                            nextRWState = IN;
+                        end
+                        else
+                          nextRWState = IDLE;                         
+      end                
+    endcase
+  end
+endmodule: rwFSM
+
+
+/*****************
+ *  PROTOCOLFSM  *
+ *****************
+ * 
+ */
 module protocolFSM(
   input   logic       transaction, pkt_ok, pkt_sent, pkt_rcvd, send_addr,
+  input   logic       start,
   input   logic       clk, rst_L,
   input   pkt_t       pkt_in,
-  input   logic [63:0] data_in, // from R/W FSM
+  input   logic [63:0] data_in,         // from R/W FSM
   output  logic       pkt_avail,
   output  pkt_t       pkt_out,
+  output  logic       clear,          // to R/W FSM
   output  logic [63:0] data_out,       // to R/W FSM
   output  logic       protocol_avail); // to R/W FSM
 
-  //enum stuff here
   enum    logic [3:0] {IDLE, WAIT_IN, IN, WAIT_OUT, WAIT_OUT2, OUT, STANDBY
                       } protocolState, nextProtocolState;
 
-  logic               timeoutEn, timeoutCtr, timeoutClr;
-  logic               totalTimeoutEn, totalTimeoutCtr, totalTimeoutClr;
-  logic               corruptEn, corruptCtr, corruptClr;
+  logic               timeoutEn, timeoutClr;
+  logic               totalTimeoutEn, totalTimeoutClr;
+  logic               corruptEn, corruptClr;
+  logic [2:0]         timeoutCtr, totalTimeoutCtr, corruptCtr;
 
-  //instantiate a counter c1
-  counter #(8)  timeout(.clk(clk), .rst_L(rst_L), .clr(timeoutClr), .ld(1'b1),
-                        .en(timeoutEn), .up(1'b1), .val(1'b0),
+  counter #(3)  timeout(.clk(clk), .rst_L(rst_L), .clr(timeoutClr), .ld(1'b1),
+                        .en(timeoutEn), .up(1'b1), .val(3'b0),
                         .cnt(timeoutCtr));
-  counter #(8)  totalTimeouts(.clk(clk), .rst_L(rst_L), .clr(totalTimeoutClrs),
-                        .ld(1'b1), .en(totalTimeoutEn), .up(1'b1), .val(1'b0),
+  counter #(3)  totalTimeouts(.clk(clk), .rst_L(rst_L), .clr(totalTimeoutClr),
+                        .ld(1'b1), .en(totalTimeoutEn), .up(1'b1), .val(3'b0),
                         .cnt(totalTimeoutCtr));
-  counter #(8)  corrupt(.clk(clk), .rst_L(rst_L), .clr(corruptClr), .ld(1'b1),
-                        .en(corruptEn), .up(1'b1), .val(1'b0),
+  counter #(3)  corrupt(.clk(clk), .rst_L(rst_L), .clr(corruptClr), .ld(1'b1),
+                        .en(corruptEn), .up(1'b1), .val(3'b0),
                         .cnt(corruptCtr));
 
   always_ff @(posedge clk or negedge rst_L) begin
@@ -129,7 +242,7 @@ module protocolFSM(
   end
 
   always_comb begin
-    protocolState = nextProtocolState;
+    nextProtocolState = protocolState;
     timeoutClr = 1'b0;
     totalTimeoutClr = 1'b0;
     corruptClr = 1'b0;
@@ -138,26 +251,29 @@ module protocolFSM(
     corruptEn = 1'b0;
     pkt_avail = 1'b0;
     protocol_avail = 1'b1;
+    clear = 1'b0;
     case (protocolState)
       IDLE:   begin
                 corruptClr = 1'b1;
                 timeoutClr = 1'b1;
                 corruptClr = 1'b1;
                 // if IN, transmit PKT_IN
-                if (transaction) begin
-                  pkt_out.pid = PID_IN;
-                  pkt_out.addr = 5;
-                  pkt_out.endp = 8;
-                  nextProtocolState = WAIT_IN;
-                  pkt_avail = 1'b1;
-                end
-                // if OUT, transmit PKT_OUT
-                else if (~transaction) begin
-                  pkt_out.pid = PID_OUT;
-                  pkt_out.addr = 5;
-                  pkt_out.endp = (send_addr) ? 8 : 4;
-                  nextProtocolState = WAIT_OUT;
-                  pkt_avail = 1'b1;
+                if (start) begin
+                  if (transaction) begin
+                    pkt_out.pid = PID_IN;
+                    pkt_out.addr = 5;
+                    pkt_out.endp = 8;
+                    nextProtocolState = WAIT_IN;
+                    pkt_avail = 1'b1;
+                  end
+                  // if OUT, transmit PKT_OUT
+                  else if (~transaction) begin
+                    pkt_out.pid = PID_OUT;
+                    pkt_out.addr = 5;
+                    pkt_out.endp = (send_addr) ? 8 : 4;
+                    nextProtocolState = WAIT_OUT;
+                    pkt_avail = 1'b1;
+                  end
                 end
               end
       WAIT_IN: begin
@@ -208,8 +324,10 @@ module protocolFSM(
                 end
               end
       STANDBY: begin
-                if (pkt_sent)
+                if (pkt_sent) begin
+                  clear = 1'b1;
                   nextProtocolState = IDLE;
+                end
                 else
                   nextProtocolState = STANDBY;
               end
@@ -237,6 +355,7 @@ module protocolFSM(
                       // everything's OK
                       if (pkt_in.pid == PID_ACK) begin
                         nextProtocolState = IDLE;
+                        protocol_avail = 1'b1;
                       end
                       // data was corrupted
                       else if (pkt_in.pid == PID_NAK) begin
@@ -245,8 +364,10 @@ module protocolFSM(
                         pkt_out.pid = PID_DATA;
                         pkt_out.data = data_in; // assume data always on line
                         // data was corrupted for 8th time
-                        if (corruptCtr == 7)
+                        if (corruptCtr == 7) begin
+                          clear = 1'b1;
                           nextProtocolState = IDLE;
+                        end
                         else
                           nextProtocolState = WAIT_OUT2;
                       end
