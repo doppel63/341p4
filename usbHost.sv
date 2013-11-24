@@ -138,7 +138,6 @@ module rwFSM(
   input   logic [15:0]  p_mempage,      // address
   input   logic [63:0]  write_data,     // data from writeData task for WRITEs
   input   logic [63:0]  data_out,       // data from protocolFSM (data to tb)
-  input   logic         clear,          // data from protocolFSM (handshakes)
   input   logic         protocol_avail, // data from protocolFSM (transaction complete)
   input   logic         protocol_OK,    // indicates no errors from protocol
   input   logic         read,           // signal from testbench for read/write
@@ -158,12 +157,12 @@ module rwFSM(
   always_ff @(posedge clk) begin
     if (~rst_L)
       RWState <= IDLE;
-    else if (clear)
-      RWState <= IDLE;
     else
       RWState <= nextRWState;
   end
 
+  // some outputs don't have default values because they are don't cares
+  // in those situations (their enable signals are off)
   always_comb begin
     trans_OK = protocol_OK;
     nextRWState = RWState;
@@ -239,7 +238,6 @@ module protocolFSM(
   input   logic [63:0] data_in,         // from R/W FSM
   output  logic       pkt_avail, ack,
   output  pkt_t       pkt_out,
-  output  logic       clear,          // to R/W FSM
   output  logic [63:0] data_out,       // to R/W FSM
   output  logic       protocol_avail, // to R/W FSM
   output  logic       protocol_OK); // to R/W FSM
@@ -290,32 +288,30 @@ module protocolFSM(
     corruptEn = 1'b0;
     pkt_avail = 1'b0;
     protocol_avail = 1'b0;
-    clear = 1'b0;
     error = 0;
     ack = 0;
-    pkt_out.data = data_in;
     data_out = pkt_in.data;
+    pkt_out.data = data_in;
+    pkt_out.addr = 5;                   // always 5
+    pkt_out.endp = (send_addr) ? 4 : 8; //endp depends if sending address or not
+    pkt_out.pid = PID_IN;               // default, should never be used
     case (protocolState)
       IDLE:   begin
                 corruptClr = 1'b1;
                 timeoutClr = 1'b1;
                 totalTimeoutClr = 1'b1;
-                // if IN, transmit PKT_IN
+                // start transaction
                 if (pStart) begin
+                  pkt_avail = 1'b1;
+                  // if IN, transmit PKT_IN
                   if (transaction) begin
                     pkt_out.pid = PID_IN;
-                    pkt_out.addr = 5;
-                    pkt_out.endp = (send_addr) ? 4 : 8;
                     nextProtocolState = WAIT_IN;
-                    pkt_avail = 1'b1;
                   end
                   // if OUT, transmit PKT_OUT
                   else if (~transaction) begin
                     pkt_out.pid = PID_OUT;
-                    pkt_out.addr = 5;
-                    pkt_out.endp = (send_addr) ? 4 : 8;
                     nextProtocolState = WAIT_OUT;
-                    pkt_avail = 1'b1;
                   end
                 end
               end
@@ -328,11 +324,11 @@ module protocolFSM(
       IN:     begin
                 if (pkt_rcvd) begin
                   ack = 1'b1;
+                  pkt_avail = 1'b1;
                   // if data is corrupt send it a NAK
                   if (~pkt_ok) begin
                     corruptEn = 1'b1;
                     timeoutClr = 1'b1;
-                    pkt_avail = 1'b1;
                     pkt_out.pid = PID_NAK;
                     // if 8th time corrupt quit
                     if (corruptCtr == 8) begin
@@ -345,7 +341,6 @@ module protocolFSM(
                   end
                   // if data's ok acknowledge and go to idle
                   else if (pkt_ok) begin
-                    pkt_avail = 1'b1;
                     pkt_out.pid = PID_ACK;
                     data_out = pkt_in.data;
                     nextProtocolState = STANDBY;
@@ -373,7 +368,6 @@ module protocolFSM(
               end
       STANDBY: begin
                 if (pkt_sent) begin
-                  // clear = 1'b1;
                   protocol_avail = 1'b1;
                   nextProtocolState = IDLE;
                 end
@@ -385,7 +379,6 @@ module protocolFSM(
                     nextProtocolState = WAIT_OUT2;
                     pkt_avail = 1'b1;
                     pkt_out.pid = PID_DATA;
-                    pkt_out.data = data_in; // assume data always on line
                   end
                   else
                     nextProtocolState = WAIT_OUT;
@@ -410,7 +403,6 @@ module protocolFSM(
                         timeoutClr = 1'b1;
                         pkt_avail = 1'b1;
                         pkt_out.pid = PID_DATA;
-                        pkt_out.data = data_in; // assume data always on line
                         // data was corrupted for 8th time
                         if (corruptCtr == 8) begin
                           error = 1;
@@ -430,7 +422,6 @@ module protocolFSM(
                         totalTimeoutEn = 1'b1;
                         pkt_avail = 1'b1;
                         pkt_out.pid = PID_DATA;
-                        pkt_out.data = data_in; // assume correct data on line
                         // timeout for 8th time
                         if (totalTimeoutCtr == 7) begin
                           error = 1;
@@ -528,7 +519,7 @@ module bitStreamEncoder(
 
     // select input to crc5 (addr or endp) and crc16 (data)
     crc5_in = (state == ADDR) ? addr[addr_cnt] : endp[endp_cnt];
-    crc16_in = data[data_cnt];
+    crc16_in = data[63-data_cnt];
     // tell bit stuffer to start checking for 1's on the last bit of PID
     send_start = pid_cnt == 7;
     // last signal asserted when on the last bit of crc5, crc16 or pid depending
@@ -727,7 +718,7 @@ module bitStreamDecoder(
                   state <= (crc5_done) ? EOP : CRC5;
                 end
         DATA:   begin
-                  pkt_in.data[data_cnt] <= bit_in;
+                  pkt_in.data[63-data_cnt] <= bit_in;
                   data_cnt <= (data_cnt < 63) ? data_cnt + 1 : 0;
                   state <= (data_cnt < 63) ? DATA : CRC16;
                 end

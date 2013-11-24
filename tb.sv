@@ -95,7 +95,7 @@ module test(
                     receivedMsg, 64'h1234_5678_90AB_CDEF);
     else $display($time,, "unsuccessful read");
 
-
+    // check timeout works correctly
     rst_L = 0;  @(posedge clk);
     rst_L <= 1; @(posedge clk);
     host.start <= 1; host.read <= 1; host.p_mempage <= 16'hABCD;
@@ -109,6 +109,7 @@ module test(
     release wires.DM;
     assert(~host.trans_OK);
     $display("tested total time out");
+    // check it still works after an unsuccessful transaction
     // write
     $display($time,, "Writing 64'hCAFE_BABE_DEAD_BEEF to addr 16'hABCD");
     flash_addr = 16'hABCD;  flash_data = 64'hCAFE_BABE_DEAD_BEEF;
@@ -124,7 +125,7 @@ module test(
                     receivedMsg, 64'hCAFE_BABE_DEAD_BEEF);
     else $display($time,, "unsuccessful read");
 
-
+    // check corrupted data packet attempts
     rst_L = 0;  @(posedge clk);
     rst_L <= 1; @(posedge clk);
     host.start <= 1; host.read <= 1; host.p_mempage <= 16'hABCD;
@@ -135,6 +136,7 @@ module test(
     @(posedge clk);
     release wires.DP;
     release wires.DM;
+    // send 8 NAKs
     repeat (8) begin
       wait(host.pkt_sent)
       #40 force wires.DP = 0;
@@ -147,6 +149,7 @@ module test(
     @(posedge clk);
     assert(~host.trans_OK);
     $display("tested total corrupted data (8x)");
+    // check it still works after an unsuccessful transaction
     // write
     $display($time,, "Writing 64'hCAFE_BABE_DEAD_BEEF to addr 16'hABCD");
     flash_addr = 16'hABCD;  flash_data = 64'hCAFE_BABE_DEAD_BEEF;
@@ -167,7 +170,7 @@ module test(
 
   end
 
-
+  // in case infinite wait
   initial begin
     #20000 $display("TIME OUT FROM TB");
     $finish;
