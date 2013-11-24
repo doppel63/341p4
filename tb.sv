@@ -27,7 +27,6 @@ module test(
       else $display("successful read, but got %x instead of %x",
                     receivedMsg, flash_data);
     else $display($time,, "unsuccessful read");
-
     @(posedge clk);
     $finish;
 
@@ -42,6 +41,7 @@ module bitStreamEncoder_tb;
   pkt_t         pkt_out;
   bit           send_stall;
   bit           bit_out, send_start, send_last;
+  bit           invalid_input;
 
   logic [95:0]  result;   // largest is SYNC + PID + DATA0 + CRC16
 
@@ -66,7 +66,7 @@ module bitStreamEncoder_tb;
     $monitor($time,, "stall = %b, start = %b, last = %b, result = %h",
                       send_stall, send_start, send_last, result);
     send_stall <= 0;
-    pkt_out.pid <= 8'b1110_0001; pkt_out.addr <= 5; pkt_out.endp <= 4;
+    pkt_out.pid <= PID_OUT; pkt_out.addr <= 5; pkt_out.endp <= 4;
     pkt_avail <= 1;
     $display("SENDING OUT to endpoint 4");
     @(posedge clk);
@@ -82,14 +82,14 @@ module bitStreamEncoder_tb;
     send_stall <= 0; repeat (9) @(posedge clk);
     // test sending DATA, data = CAFEBABEDEADBEEF
     $display("SENDING DATA = CAFEBABEDEADBEEF");
-    pkt_out.pid <= 8'b1100_0011; pkt_out.data <= 64'hCAFEBABEDEADBEEF;
+    pkt_out.pid <= PID_DATA; pkt_out.data <= 64'hCAFEBABEDEADBEEF;
     pkt_avail <= 1;
     @(posedge clk);
     pkt_avail <= 0;
     repeat (97) @(posedge clk);
     // test sending ACK
     $display("SENDING ACK");
-    pkt_out.pid <= 8'b1101_0010;
+    pkt_out.pid <= PID_ACK;
     pkt_avail <= 1;
     @(posedge clk);
     pkt_avail <= 0;
@@ -114,7 +114,6 @@ module bitStreamDecoder_tb;
   bit   ack;
   pkt_t pkt_in;
   bit   pkt_rcvd, pkt_ok;
-  bit   invalid_input;
 
   bitStreamEncoder dut0(.*);
   bitStreamDecoder dut1(.*);
@@ -129,7 +128,7 @@ module bitStreamDecoder_tb;
                       send_stall, send_start, send_last, pkt_in);
     send_stall <= 0; rcv_stall <= 0;
     bit_stuff_ok <= 1; EOP_ok <= 1; ack <= 0;
-    pkt_out.pid <= PID_OUT; pkt_out.addr <= 5; pkt_out.endp <= 4;
+    pkt_out.pid <= 8'b1110_0001; pkt_out.addr <= 5; pkt_out.endp <= 4;
     pkt_avail <= 1;
     $display("SENDING OUT to endpoint 4");
     @(posedge clk);
@@ -149,7 +148,7 @@ module bitStreamDecoder_tb;
     ack <= 0;
     // test sending DATA, data = CAFEBABEDEADBEEF
     $display("SENDING DATA = CAFEBABEDEADBEEF");
-    pkt_out.pid <= PID_DATA; pkt_out.data <= 64'hCAFEBABEDEADBEEF;
+    pkt_out.pid <= 8'b1100_0011; pkt_out.data <= 64'hCAFEBABEDEADBEEF;
     pkt_avail <= 1;
     @(posedge clk);
     pkt_avail <= 0;
@@ -158,7 +157,7 @@ module bitStreamDecoder_tb;
     ack <= 0;
     // test sending ACK
     $display("SENDING ACK");
-    pkt_out.pid <= PID_ACK;
+    pkt_out.pid <= 8'b1101_0010;
     pkt_avail <= 1;
     @(posedge clk);
     pkt_avail <= 0;
@@ -622,6 +621,65 @@ rst_L = %b, dm = %b, dp = %b, state = %s", stream_out, pkt_avail, dpdm1.en,
   end
 endmodule
 
+module protocolFSM_tb;
+
+  logic         transaction, pkt_ok, pkt_sent, pkt_rcvd, send_addr;
+  logic         pkt_avail, protocol_avail;
+  logic         clk, rst_L;
+  logic         start, clear;
+  pkt_t         pkt_in, pkt_out;
+  logic [63:0]  data_in, data_out;
+
+  protocolFSM pFSM(.*);
+  clock ck1(.*);
+
+  initial begin
+    $monitor($time,, 
+              "rst_L = %b, IN_pid = %b, IN_addr = %b, IN_endp = %b\n\
+              IN_data = %x, OUT_data = %x\n\
+              OUT_pid = %b, OUT_addr = %b, OUT_endp = %b\n\
+              transaction = %b, pkt_ok = %b, pkt_sent = %b, pkt_rcvd = %b\n\
+              send_addr = %b, pkt_avail = %b, protocol_avail = %b, state = %s\n",
+              rst_L, pkt_in.pid, pkt_in.addr, pkt_in.endp,
+              pkt_in.data, pkt_out.data,
+              pkt_out.pid, pkt_out.addr, pkt_out.endp,
+              transaction, pkt_ok, pkt_sent, pkt_rcvd,
+              send_addr, pkt_avail, protocol_avail, pFSM.protocolState);
+    @(posedge clk);
+    rst_L <= 0;
+    @(posedge clk);
+    rst_L <= 1;
+    transaction <= 0;
+    start <= 1;
+    $display("OUT TRANSACTION");
+    @(posedge clk);
+    start <= 0;
+    @(posedge clk);
+    send_addr <= 1'b1;
+    pkt_sent <= 1;
+    @(posedge clk);
+    send_addr <= 0;
+    pkt_sent <= 0;
+    pkt_rcvd <= 0;
+    repeat (2) @(posedge clk);
+    pkt_rcvd <= 1;
+    pkt_ok <= 1;
+    pkt_in.data <= 64'hFA20;
+    repeat (2) @(posedge clk);
+    pkt_sent <= 1'b1;
+    pkt_rcvd <= 0;
+    pkt_ok <= 0;
+    @(posedge clk);
+    pkt_rcvd <= 1'b1;
+    pkt_in.pid <= PID_ACK;
+    @(posedge clk);
+    $display("DONE WITH OUT TRANSACTION");
+    @(posedge clk);
+    $finish;
+  end
+
+endmodule: protocolFSM_tb
+
 module clock(
   output logic clk);
 
@@ -631,4 +689,98 @@ module clock(
   end
 endmodule: clock
 
+module FSM_tb;
+  logic         transaction, protocol_avail, pStart;
+  logic         clear, send_addr;
+  logic [63:0]  data_in, data_out;
 
+  // internal inputs to protocol
+  logic pkt_ok, pkt_sent, pkt_rcvd, pkt_avail;
+  pkt_t pkt_in;
+
+  // internal outputs from protocol
+  pkt_t pkt_out;
+
+  // inputs from tb
+  logic         clk, rst_L;
+  logic read, start;
+  logic [15:0] mempage;
+  logic [63:0] write_data;
+
+  // outputs
+  logic [63:0] data_tb;
+
+  protocolFSM pFSM(.*);
+  rwFSM rFSM(.*);
+  clock ck1(.*);
+
+  initial begin
+    $monitor($time,, "mempage = %h, data = %h, read = %b, start = %b, addr? = %b\n\
+                      pState = %s, rwState = %s\n",
+                      mempage, write_data, read, start, send_addr, pFSM.protocolState, rFSM.RWState);
+    @(posedge clk);
+    rst_L <= 0; $display("Resetting...");
+    @(posedge clk);
+    rst_L <= 1;
+    mempage <= 16'd22;
+    start <= 1;
+    write_data <= 64'habcd;
+    read <= 0;
+    $display("OUT TRANSACTION as part of WRITE");
+    @(posedge clk);
+    start <= 0;
+    assert(data_in && ~transaction && send_addr);
+    repeat (12) @(posedge clk);
+    pkt_sent <= 1;                // packet sent by sender, ready for data
+    @(posedge clk);
+    $display("Sent OUT address packet.");
+    pkt_sent <= 0;
+    pkt_rcvd <= 0;
+    repeat (20) @(posedge clk);
+    pkt_rcvd <= 1;                // packet received by receiver
+    pkt_ok <= 1;
+    pkt_in.data <= 64'hFA20;
+    repeat (2) @(posedge clk);
+    $display("Sent DATA address packet.");
+    pkt_sent <= 1'b1;
+    pkt_rcvd <= 0;
+    pkt_ok <= 0;
+    @(posedge clk);
+    pkt_sent <= 1'b0;
+    repeat (22) @(posedge clk);
+    pkt_rcvd <= 1'b1;
+    pkt_in.pid <= PID_ACK;
+    @(posedge clk);
+    $display("Received ACK address packet.");
+    $display("DONE WITH OUT TRANSACTION");
+    @(posedge clk);
+    $display("OUT TRANSACTION as part of WRITE");
+    @(posedge clk);
+    start <= 0;
+    repeat (12) @(posedge clk);
+    pkt_sent <= 1;                // packet sent by sender, ready for data
+    @(posedge clk);
+    $display("Sent OUT address packet.");
+    pkt_sent <= 0;
+    pkt_rcvd <= 0;
+    repeat (20) @(posedge clk);
+    pkt_rcvd <= 1;                // packet received by receiver
+    pkt_ok <= 1;
+    pkt_in.data <= 64'hFA20;
+    repeat (2) @(posedge clk);
+    $display("Sent DATA address packet.");
+    pkt_sent <= 1'b1;
+    pkt_rcvd <= 0;
+    pkt_ok <= 0;
+    @(posedge clk);
+    repeat (22) @(posedge clk);
+    pkt_rcvd <= 1'b1;
+    pkt_in.pid <= PID_ACK;
+    @(posedge clk);
+    $display("Received ACK address packet.");
+    @(posedge clk);
+
+    $finish;
+  end
+
+endmodule: FSM_tb

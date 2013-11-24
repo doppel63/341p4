@@ -117,6 +117,7 @@ module rwFSM(
   input   logic         read,           // exists in usbHost!!!
   input   logic         start,
   input   logic         clk, rst_L,
+  output  logic         pStart,
   output  logic [63:0]  data_tb,        // data to testbench
   output  logic         transaction,    // data to protocolFSM (1=>in)
   output  logic [63:0]  data_in,        // data to protocolFSM
@@ -135,6 +136,7 @@ module rwFSM(
 
   always_comb begin
     nextRWState = RWState;
+    pStart = 1'b0;
     case (RWState)
       IDLE:           begin
                         if (start) begin
@@ -153,18 +155,20 @@ module rwFSM(
       OUT:            begin
                         if (~clear) begin
                           if (protocol_avail) // signals that protocol is done
-                            if (read) begin
+                            if (~read) begin
                               // send data!
                               data_in = write_data;
                               transaction = 1'b0;
                               send_addr = 1'b0;
                               nextRWState = OUT2;
+                              pStart = 1'b1;
                             end
                             else begin
                               // receive data!
                               transaction = 1'b1;
                               send_addr = 1'b0;
                               nextRWState = IN;
+                              pStart = 1'b1;
                             end
                           else
                             nextRWState = OUT;
@@ -173,6 +177,7 @@ module rwFSM(
                           nextRWState = IDLE;
       end
       OUT2:           begin
+                              pStart = 1'b1;
                         if (~clear) begin
                           if (protocol_avail) // signals that protocol is done
                             nextRWState = IDLE;
@@ -183,6 +188,7 @@ module rwFSM(
                           nextRWState = IDLE;
       end
       IN:             begin
+                              pStart = 1'b1;
                         if (~clear) begin
                           if (protocol_avail) begin
                             data_tb = data_out; // send data from device to tb
@@ -206,7 +212,7 @@ endmodule: rwFSM
  */
 module protocolFSM(
   input   logic       transaction, pkt_ok, pkt_sent, pkt_rcvd, send_addr,
-  input   logic       start,
+  input   logic       pStart, start,
   input   logic       clk, rst_L,
   input   pkt_t       pkt_in,
   input   logic [63:0] data_in,         // from R/W FSM
@@ -250,7 +256,7 @@ module protocolFSM(
     totalTimeoutEn = 1'b0;
     corruptEn = 1'b0;
     pkt_avail = 1'b0;
-    protocol_avail = 1'b1;
+    protocol_avail = 1'b0;
     clear = 1'b0;
     case (protocolState)
       IDLE:   begin
@@ -258,7 +264,7 @@ module protocolFSM(
                 timeoutClr = 1'b1;
                 corruptClr = 1'b1;
                 // if IN, transmit PKT_IN
-                if (start) begin
+                if (pStart || start) begin
                   if (transaction) begin
                     pkt_out.pid = PID_IN;
                     pkt_out.addr = 5;
