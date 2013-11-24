@@ -5,6 +5,7 @@
  * November 14, 2013
  */
 
+
 `ifndef types
   typedef enum bit [7:0] {PID_OUT = 8'b1110_0001, PID_IN = 8'b0110_1001,
                           PID_DATA = 8'b1100_0011,
@@ -18,6 +19,7 @@
   } pkt_t;
 `endif
 
+
 /****************
  *   USBHOST    *
  ****************
@@ -29,7 +31,11 @@ module usbHost(
   input  logic        clk, rst_L, 
   usbWires wires);
 
-  // this stuff handles bit-level protocols for sending a packet
+  /* 
+   bit-level FSMs 
+   */
+
+  // handles bit-level protocols for sending a packet
   pkt_t pkt_out;
   bit   pkt_avail, pkt_sent;
   bit   send_stall, send_start, send_last;
@@ -41,7 +47,7 @@ module usbHost(
                     .bit_out(send_stuffed_bit_stream));
   nrzi n1(.*, .bit_stream(send_stuffed_bit_stream));
 
-  // this stuff handles bit-level protocols for receiving a packet
+  // handles bit-level protocols for receiving a packet
   pkt_t pkt_in;
   bit   pkt_rcvd, pkt_ok, ack;
   bit   rcv_stall, rcv_start, rcv_last;
@@ -56,7 +62,10 @@ module usbHost(
   // dpdm is linked to both parts
   dpdm d1(.*);
 
-  // FSMs
+  /* 
+   protocol level FSM 
+   */
+
   // stuff between FSMs
   bit         transaction, protocol_avail, pStart;
   bit         clear, send_addr, protocol_OK;
@@ -69,19 +78,18 @@ module usbHost(
   protocolFSM pFSM(.*);
   rwFSM rFSM(.*);
 
-  // Tasks needed to be finished to run testbenches
 
   /* PRELABREQUEST */
   // sends an OUT packet with ADDR=5 and ENDP=4
   // packet should have SYNC and EOP too
-  task prelabRequest
-  (input  bit [7:0]   data);
+  task prelabRequest(
+    input  bit [7:0]   data);
 
-  pkt_out.pid <= PID_OUT; pkt_out.addr <= 5; pkt_out.endp <= 4;
-  pkt_avail <= 1;
-  @(posedge clk);
-  pkt_avail <= 0;
-  repeat (40) @(posedge clk);
+    pkt_out.pid <= PID_OUT; pkt_out.addr <= 5; pkt_out.endp <= 4;
+    pkt_avail <= 1;
+    @(posedge clk);
+    pkt_avail <= 0;
+    repeat (40) @(posedge clk);
 
   endtask: prelabRequest
 
@@ -121,6 +129,7 @@ module usbHost(
 
 endmodule: usbHost
 
+
 /*****************
  *    R/W FSM    *
  *****************
@@ -135,7 +144,7 @@ endmodule: usbHost
  */
 
 module rwFSM(
-  input   logic [15:0]  p_mempage,      // address
+  input   logic [15:0]  p_mempage,      // address from task
   input   logic [63:0]  write_data,     // data from writeData task for WRITEs
   input   logic [63:0]  data_out,       // data from protocolFSM (data to tb)
   input   logic         protocol_avail, // data from protocolFSM (transaction complete)
@@ -143,7 +152,7 @@ module rwFSM(
   input   logic         read,           // signal from testbench for read/write
   input   logic         start,          // signal from testbench to start
   input   logic         clk, rst_L,
-  output  logic         pStart,
+  output  logic         pStart,         // soft start from protocol
   output  logic [63:0]  data_tb,        // data to testbench
   output  logic         done,           // signal to testbench that it's done
   output  logic         trans_OK,       // indicates transaction was OK
@@ -161,8 +170,8 @@ module rwFSM(
       RWState <= nextRWState;
   end
 
-  // some outputs don't have default values because they are don't cares
-  // in those situations (their enable signals are off)
+  // Note: some outputs don't have default values because they are don't cares.
+  // Inn those situations (their enable signals are off).
   always_comb begin
     trans_OK = protocol_OK;
     nextRWState = RWState;
@@ -183,12 +192,14 @@ module rwFSM(
                         end
                       end
       OUT:            begin
-                        if (protocol_avail) // signals that protocol is done
+                        if (protocol_avail)
+                          // signals that protocol is done
                           nextRWState = OUT_WAIT;
                         else
                           nextRWState = OUT;
                       end
-      OUT_WAIT:       begin   // this state gives protocolFSM time to get back to IDLE
+      OUT_WAIT:       begin   
+                        // this state gives protocolFSM time to get back to IDLE
                         if (~read) begin
                             // send data!
                             data_in = write_data;
@@ -225,32 +236,34 @@ module rwFSM(
   end
 endmodule: rwFSM
 
+
 /*****************
  *  PROTOCOLFSM  *
  *****************
- * 
+ * Receives R/W transaction data from rwFSM and translates into IN/OUT
+ * transactions.  Completes transactions, and sends results to rwFSM.
  */
 module protocolFSM(
-  input   logic       transaction, pkt_ok, pkt_sent, pkt_rcvd, send_addr,
-  input   logic       pStart,
-  input   logic       clk, rst_L,
-  input   pkt_t       pkt_in,
-  input   logic [63:0] data_in,         // from R/W FSM
-  output  logic       pkt_avail, ack,
-  output  pkt_t       pkt_out,
-  output  logic [63:0] data_out,       // to R/W FSM
-  output  logic       protocol_avail, // to R/W FSM
-  output  logic       protocol_OK); // to R/W FSM
+  input   logic         transaction, pkt_ok, pkt_sent, pkt_rcvd, send_addr,
+  input   logic         pStart, 
+  input   logic         clk, rst_L,
+  input   pkt_t         pkt_in,
+  input   logic [63:0]  data_in,            // from R/W FSM
+  output  logic         pkt_avail, ack,
+  output  pkt_t         pkt_out,
+  output  logic [63:0]  data_out,           // to R/W FSM
+  output  logic         protocol_avail,     // to R/W FSM
+  output  logic         protocol_OK);       // to R/W FSM
 
   enum    logic [2:0] {IDLE, WAIT_IN, IN, WAIT_OUT, WAIT_OUT2, OUT, STANDBY,
                       ERROR} protocolState, nextProtocolState;
 
-  logic               error;
-  logic               timeoutEn, timeoutClr;
-  logic               totalTimeoutEn, totalTimeoutClr;
-  logic               corruptEn, corruptClr;
-  logic [3:0]         totalTimeoutCtr, corruptCtr;
-  logic [7:0]         timeoutCtr;
+  logic                 error;
+  logic                 timeoutEn, timeoutClr;
+  logic                 totalTimeoutEn, totalTimeoutClr;
+  logic                 corruptEn, corruptClr;
+  logic [3:0]           totalTimeoutCtr, corruptCtr;
+  logic [7:0]           timeoutCtr;
 
   counter #(8)  timeout(.clk(clk), .rst_L(rst_L), .clr(timeoutClr), .ld(1'b0),
                         .en(timeoutEn), .up(1'b1), .val(8'b0),
@@ -293,152 +306,151 @@ module protocolFSM(
     data_out = pkt_in.data;
     pkt_out.data = data_in;
     pkt_out.addr = 5;                   // always 5
-    pkt_out.endp = (send_addr) ? 4 : 8; //endp depends if sending address or not
+    pkt_out.endp = (send_addr) ? 4 : 8; // depends if sending address or data
     pkt_out.pid = PID_IN;               // default, should never be used
     case (protocolState)
-      IDLE:   begin
-                corruptClr = 1'b1;
-                timeoutClr = 1'b1;
-                totalTimeoutClr = 1'b1;
-                // start transaction
-                if (pStart) begin
-                  pkt_avail = 1'b1;
-                  // if IN, transmit PKT_IN
-                  if (transaction) begin
-                    pkt_out.pid = PID_IN;
-                    nextProtocolState = WAIT_IN;
-                  end
-                  // if OUT, transmit PKT_OUT
-                  else if (~transaction) begin
-                    pkt_out.pid = PID_OUT;
-                    nextProtocolState = WAIT_OUT;
-                  end
-                end
-              end
-      WAIT_IN: begin
-                if (pkt_sent)
-                  nextProtocolState = IN;
-                else
-                  nextProtocolState = WAIT_IN;
-              end
-      IN:     begin
-                if (pkt_rcvd) begin
-                  ack = 1'b1;
-                  pkt_avail = 1'b1;
-                  // if data is corrupt send it a NAK
-                  if (~pkt_ok) begin
-                    corruptEn = 1'b1;
-                    timeoutClr = 1'b1;
-                    pkt_out.pid = PID_NAK;
-                    // if 8th time corrupt quit
-                    if (corruptCtr == 8) begin
-                      error = 1;
-                      pkt_avail = 0;
-                      nextProtocolState = ERROR;
-                    end
-                    else
-                      nextProtocolState = WAIT_IN;
-                  end
-                  // if data's ok acknowledge and go to idle
-                  else if (pkt_ok) begin
-                    pkt_out.pid = PID_ACK;
-                    data_out = pkt_in.data;
-                    nextProtocolState = STANDBY;
-                  end
-                end
-                // packet has not been recieved yet keep waiting
-                else if (~pkt_rcvd) begin
-                  timeoutEn = 1'b1;
-                  // if the request timed out (255)
-                  if (timeoutCtr == 255) begin
-                    ack = 1'b1;
-                    totalTimeoutEn = 1'b1;
-                    pkt_avail = 1'b1;
-                    pkt_out.pid = PID_NAK;
-                    // if 8th time timed out quit
-                    if (totalTimeoutCtr == 8) begin
-                      error = 1;
-                      pkt_avail = 0;
-                      nextProtocolState = ERROR;
-                    end
-                    else
-                      nextProtocolState = WAIT_IN;
-                  end
-                end
-              end
-      STANDBY: begin
-                if (pkt_sent) begin
-                  protocol_avail = 1'b1;
-                  nextProtocolState = IDLE;
-                end
-                else
-                  nextProtocolState = STANDBY;
-              end
-      WAIT_OUT: begin
-                  if (pkt_sent) begin
-                    nextProtocolState = WAIT_OUT2;
-                    pkt_avail = 1'b1;
-                    pkt_out.pid = PID_DATA;
-                  end
-                  else
-                    nextProtocolState = WAIT_OUT;
-                  end
-      WAIT_OUT2:  begin
-                    if (pkt_sent)
-                      nextProtocolState = OUT;
-                    else
-                      nextProtocolState = WAIT_OUT2;
-                  end
-      OUT:        begin
-                    if (pkt_rcvd) begin
-                      ack = 1'b1;
-                      // everything's OK
-                      if (pkt_in.pid == PID_ACK) begin
-                        nextProtocolState = IDLE;
-                        protocol_avail = 1'b1;
-                      end
-                      // data was corrupted
-                      else if (pkt_in.pid == PID_NAK) begin
-                        corruptEn = 1'b1;
-                        timeoutClr = 1'b1;
-                        pkt_avail = 1'b1;
-                        pkt_out.pid = PID_DATA;
-                        // data was corrupted for 8th time
-                        if (corruptCtr == 8) begin
-                          error = 1;
-                          pkt_avail = 0;
-                          nextProtocolState = ERROR;
+      IDLE:             begin
+                          corruptClr = 1'b1;
+                          timeoutClr = 1'b1;
+                          totalTimeoutClr = 1'b1;
+                          // start transaction
+                          if (pStart) begin
+                            pkt_avail = 1'b1;
+                            // if IN, transmit PKT_IN
+                            if (transaction) begin
+                              pkt_out.pid = PID_IN;
+                              nextProtocolState = WAIT_IN;
+                            end
+                            // if OUT, transmit PKT_OUT
+                            else if (~transaction) begin
+                              pkt_out.pid = PID_OUT;
+                              nextProtocolState = WAIT_OUT;
+                            end
+                          end
                         end
-                        else
-                          nextProtocolState = WAIT_OUT2;
-                      end
-                      // there better not be an or else here
-                    end
-                    else begin
-                      timeoutEn = 1'b1;
-                      // timeout waiting for response
-                      if (timeoutCtr == 255) begin
-                        ack = 1'b1;
-                        totalTimeoutEn = 1'b1;
-                        pkt_avail = 1'b1;
-                        pkt_out.pid = PID_DATA;
-                        // timeout for 8th time
-                        if (totalTimeoutCtr == 7) begin
-                          error = 1;
-                          nextProtocolState = STANDBY;
+      WAIT_IN:          begin
+                          if (pkt_sent)
+                            nextProtocolState = IN;
+                          else
+                            nextProtocolState = WAIT_IN;
                         end
-                        else
-                          nextProtocolState = WAIT_OUT2;
-                      end
-                      else
-                        nextProtocolState = OUT;
-                    end
-                  end
-      ERROR:      begin
-                    protocol_avail = 1;
-                    nextProtocolState = IDLE;
-                  end
-                endcase
+      IN:               begin
+                          if (pkt_rcvd) begin
+                            ack = 1'b1;
+                            pkt_avail = 1'b1;
+                            // if data is corrupt send it a NAK
+                            if (~pkt_ok) begin
+                              corruptEn = 1'b1;
+                              timeoutClr = 1'b1;
+                              pkt_out.pid = PID_NAK;
+                              // if 8th time corrupt quit
+                              if (corruptCtr == 8) begin
+                                error = 1;
+                                pkt_avail = 0;
+                                nextProtocolState = ERROR;
+                              end
+                              else
+                                nextProtocolState = WAIT_IN;
+                            end
+                            // if data's ok acknowledge and go to idle
+                            else if (pkt_ok) begin
+                              pkt_out.pid = PID_ACK;
+                              data_out = pkt_in.data;
+                              nextProtocolState = STANDBY;
+                            end
+                          end
+                          // packet has not been recieved yet keep waiting
+                          else if (~pkt_rcvd) begin
+                            timeoutEn = 1'b1;
+                            // if the request timed out (255)
+                            if (timeoutCtr == 255) begin
+                              ack = 1'b1;
+                              totalTimeoutEn = 1'b1;
+                              pkt_avail = 1'b1;
+                              pkt_out.pid = PID_NAK;
+                              // if 8th time timed out quit
+                              if (totalTimeoutCtr == 8) begin
+                                error = 1;
+                                pkt_avail = 0;
+                                nextProtocolState = ERROR;
+                              end
+                              else
+                                nextProtocolState = WAIT_IN;
+                              end
+                          end
+                        end
+      STANDBY:          begin
+                          if (pkt_sent) begin
+                            protocol_avail = 1'b1;
+                            nextProtocolState = IDLE;
+                          end   
+                          else
+                            nextProtocolState = STANDBY;
+                        end
+      WAIT_OUT:         begin
+                          if (pkt_sent) begin
+                            nextProtocolState = WAIT_OUT2;
+                            pkt_avail = 1'b1;
+                            pkt_out.pid = PID_DATA;
+                          end
+                          else
+                            nextProtocolState = WAIT_OUT;
+                        end
+      WAIT_OUT2:        begin
+                          if (pkt_sent)
+                            nextProtocolState = OUT;
+                          else
+                            nextProtocolState = WAIT_OUT2;
+                        end
+      OUT:              begin
+                          if (pkt_rcvd) begin
+                            ack = 1'b1;
+                            // everything's OK
+                            if (pkt_in.pid == PID_ACK) begin
+                              nextProtocolState = IDLE;
+                              protocol_avail = 1'b1;
+                            end
+                            // data was corrupted
+                            else if (pkt_in.pid == PID_NAK) begin
+                              corruptEn = 1'b1;
+                              timeoutClr = 1'b1;
+                              pkt_avail = 1'b1;
+                              pkt_out.pid = PID_DATA;
+                              // data was corrupted for 8th time
+                              if (corruptCtr == 8) begin
+                                error = 1;
+                                pkt_avail = 0;
+                                nextProtocolState = ERROR;
+                              end
+                              else
+                                nextProtocolState = WAIT_OUT2;
+                            end
+                          end
+                          else begin
+                            timeoutEn = 1'b1;
+                            // timeout waiting for response
+                            if (timeoutCtr == 255) begin
+                              ack = 1'b1;
+                              totalTimeoutEn = 1'b1;
+                              pkt_avail = 1'b1;
+                              pkt_out.pid = PID_DATA;
+                              // timeout for 8th time
+                              if (totalTimeoutCtr == 7) begin
+                                error = 1;
+                                nextProtocolState = STANDBY;
+                              end
+                              else
+                                nextProtocolState = WAIT_OUT2;
+                            end
+                            else
+                              nextProtocolState = OUT;
+                          end
+                        end
+      ERROR:            begin
+                          protocol_avail = 1;
+                          nextProtocolState = IDLE;
+                        end
+      endcase
   end
 endmodule: protocolFSM
 
@@ -451,34 +463,33 @@ endmodule: protocolFSM
  * last at the same clock cycle as the last bit of the input.
  */
 module bitStreamEncoder(
-  input   logic       clk, rst_L,
-  input   bit         pkt_avail,
-  input   pkt_t       pkt_out,
-  input   bit         send_stall,
-  output  bit         bit_out, send_start, send_last);
+  input   logic         clk, rst_L,
+  input   bit           pkt_avail,
+  input   pkt_t         pkt_out,
+  input   bit           send_stall,
+  output  bit           bit_out, send_start, send_last);
 
   // internal wires
-  enum    bit [7:0]  {OUT = 8'b1110_0001, IN = 8'b0110_1001,
-                      DATA0 = 8'b1100_0011,
-                      ACK = 8'b1101_0010, NAK = 8'b0101_1010} pid;
-  bit [6:0]           addr;
-  bit [3:0]           endp;
-  bit [63:0]          data;
-  bit                 crc5_in, crc5, crc16_in, crc16;
+  enum    bit [7:0]    {OUT = 8'b1110_0001, IN = 8'b0110_1001,
+                        DATA0 = 8'b1100_0011,
+                        ACK = 8'b1101_0010, NAK = 8'b0101_1010} pid;
+  bit [6:0]             addr;
+  bit [3:0]             endp;
+  bit [63:0]            data;
+  bit                   crc5_in, crc5, crc16_in, crc16;
 
   // internal control points; also wires anyway
-  bit                 crc5_en, crc16_en;
-  bit [2:0]           sync_cnt;
-  bit [1:0]           endp_cnt;
-  bit [2:0]           pid_cnt, addr_cnt;
-  bit [5:0]           data_cnt;
-  bit [2:0]           crc5_cnt;
-  bit [3:0]           crc16_cnt;
-  bit [1:0]           done_cnt;
+  bit                   crc5_en, crc16_en;
+  bit [2:0]             sync_cnt;
+  bit [1:0]             endp_cnt;
+  bit [2:0]             pid_cnt, addr_cnt;
+  bit [5:0]             data_cnt;
+  bit [2:0]             crc5_cnt;
+  bit [3:0]             crc16_cnt;
+  bit [1:0]             done_cnt;
 
-  // states for FSM
-  enum    bit [3:0] {IDLE, SYNC, PID, ADDR, ENDP, CRC5, DATA, CRC16, DONE
-                      } state;
+  enum    bit [3:0]     {IDLE, SYNC, PID, ADDR, ENDP, CRC5, DATA, CRC16, DONE
+                        } state;
 
   // instantiate counters datapath as registers for holding stuff
   counter #(8)  pidReg(.clk(clk), .rst_L(rst_L), .clr(), .ld(pkt_avail), .en(),
@@ -495,13 +506,11 @@ module bitStreamEncoder(
   crc16Sender crc16s(.en(~send_stall && crc16_en), .msg_in(crc16_in),
                     .msg_out(crc16), .*);
 
-  // combinational logic to fill out gaps. mostly muxes.
   always_comb begin
     // output mux, determined by which state we're in
     bit_out = 'd0; // could be x?
     crc5_en = 0;
     crc16_en = 0;
-
     case (state)
       SYNC:             
                           bit_out = sync_cnt == 7;
@@ -543,57 +552,63 @@ module bitStreamEncoder(
     else if (~send_stall) begin
       // only change values if no stall signal from bit stuffing
       case (state)
-        IDLE:   begin
-                  state <= (pkt_avail) ? SYNC : IDLE;
-                end
-        SYNC:   begin
-                  sync_cnt <= sync_cnt + 1;
-                  state <= (sync_cnt == 7) ? PID : SYNC;
-                end
-        PID:    begin
-                  if (pid_cnt < 7) begin
-                    pid_cnt <= pid_cnt + 1;
-                    state <= PID;
-                  end
-                  else begin
-                    pid_cnt <= 0;
-                    case (pid)
-                      IN, OUT:  state <= ADDR;
-                      DATA0:    state <= DATA;
-                      ACK, NAK: state <= DONE;
-                      default:  state <= DONE;
-                    endcase
-                   end
-                end
-        ADDR:   begin
-                  addr_cnt <= (addr_cnt < 6) ? addr_cnt + 1 : 0;
-                  state <= (addr_cnt < 6) ? ADDR : ENDP;
-                end
-        ENDP:   begin
-                  endp_cnt <= (endp_cnt < 3) ? endp_cnt + 1 : 0;
-                  state <= (endp_cnt < 3) ? ENDP : CRC5;
-                end
-        CRC5:   begin
-                  crc5_cnt <= (crc5_cnt < 4) ? crc5_cnt + 1 : 0;
-                  state <= (crc5_cnt < 4) ? CRC5 : DONE;
-                end
-        DATA:   begin
-                  data_cnt <= (data_cnt < 63) ? data_cnt + 1 : 0;
-                  state <= (data_cnt < 63) ? DATA : CRC16;
-                end
-        CRC16:  begin
-                  crc16_cnt <= (crc16_cnt < 15) ? crc16_cnt + 1 : 0;
-                  state <= (crc16_cnt < 15) ? CRC16 : DONE;
-                end
-        DONE:   begin
-                  done_cnt <= (done_cnt < 2) ? done_cnt + 1 : 0;
-                  state <= (done_cnt < 2) ? DONE : ((pkt_avail) ? SYNC : IDLE);
-                end
+        IDLE:           begin
+                          state <= (pkt_avail) ? SYNC : IDLE;
+                        end
+        SYNC:           begin
+                          sync_cnt <= sync_cnt + 1;
+                          state <= (sync_cnt == 7) ? PID : SYNC;
+                        end
+        PID:            begin
+                          if (pid_cnt < 7) begin
+                            pid_cnt <= pid_cnt + 1;
+                            state <= PID;
+                          end
+                          else begin
+                            pid_cnt <= 0;
+                            case (pid)
+                              IN, OUT:  state <= ADDR;
+                              DATA0:    state <= DATA;
+                              ACK, NAK: state <= DONE;
+                              default:  state <= DONE;
+                            endcase
+                           end
+                        end
+        ADDR:           begin
+                          addr_cnt <= (addr_cnt < 6) ? addr_cnt + 1 : 0;
+                          state <= (addr_cnt < 6) ? ADDR : ENDP;
+                        end
+        ENDP:           begin
+                          endp_cnt <= (endp_cnt < 3) ? endp_cnt + 1 : 0;
+                          state <= (endp_cnt < 3) ? ENDP : CRC5;
+                        end
+        CRC5:           begin
+                          crc5_cnt <= (crc5_cnt < 4) ? crc5_cnt + 1 : 0;
+                          state <= (crc5_cnt < 4) ? CRC5 : DONE;
+                        end
+        DATA:           begin
+                          data_cnt <= (data_cnt < 63) ? data_cnt + 1 : 0;
+                          state <= (data_cnt < 63) ? DATA : CRC16;
+                        end
+        CRC16:          begin
+                          crc16_cnt <= (crc16_cnt < 15) ? crc16_cnt + 1 : 0;
+                          state <= (crc16_cnt < 15) ? CRC16 : DONE;
+                        end
+        DONE:           begin
+                          done_cnt <= (done_cnt < 2) ? done_cnt + 1 : 0;
+                          state <= (done_cnt < 2) ? DONE : ((pkt_avail) ? SYNC : IDLE);
+                        end
       endcase
     end
   end
 endmodule: bitStreamEncoder
 
+
+/**********************
+ *  BITSTREAMDECODER  *
+ **********************
+ * Decodes the incoming stream of data into a packet.
+ */
 module bitStreamDecoder(
   input   logic clk, rst_L,
   // to rest of receiver stuff
@@ -617,7 +632,6 @@ module bitStreamDecoder(
   bit [1:0] endp_cnt, done_cnt;
   bit [5:0] data_cnt;
 
-  // states for FSM
   enum bit [3:0] {WAIT, PID, ADDR, ENDP, CRC5, DATA, CRC16, EOP, DONE} state;
 
   crc5Receiver crc5Rcv(.en(~rcv_stall & crc5_en), .msg_in(bit_in),
@@ -625,7 +639,6 @@ module bitStreamDecoder(
   crc16Receiver crc16Rcv(.en(~rcv_stall & crc16_en), .msg_in(bit_in),
                        .done(crc16_done), .OK(crc16_ok), .msg(), .*);
 
-  // comb logic for some outputs
   always_comb begin
     next_pid = {bit_in, pkt_in.pid[6:0]};
     crc5_en = state == ADDR || state == ENDP || state == CRC5;
@@ -656,7 +669,7 @@ module bitStreamDecoder(
       pkt_ok <= 0;  // invalid pid
   end
 
-  // FSM
+  // FSM state logic
   always_ff @(posedge clk, negedge rst_L) begin
     if (~rst_L) begin
       state <= WAIT;
@@ -736,9 +749,8 @@ module bitStreamDecoder(
       endcase
     end
   end
-
-
 endmodule: bitStreamDecoder
+
 
 /******************
  *    CRC5CALC    *
@@ -764,6 +776,7 @@ module crc5Calc(
 
 endmodule: crc5Calc
 
+
 /*******************
  *    CRC16CALC    *
  *******************
@@ -788,6 +801,7 @@ module crc16Calc(
   end
 
 endmodule: crc16Calc
+
 
 /**************
  *   COUNTER  *
@@ -1120,17 +1134,12 @@ module crc16Receiver(
               ns = (cnt != 15) ? REM : DONE;
             end
       DONE: begin
-              //done = 1;
               cnt_clr = (ack) ? 1 : 0;
               crc_clr = (ack) ? 1 : 0;
               ns = (ack) ? BODY : DONE;
             end
     endcase
   end
-  /*
-  always @(posedge done)
-    #1 $display("msg received! msg: %h, OK = %b", msg, OK);
-  */
 endmodule: crc16Receiver
 
 
@@ -1140,8 +1149,6 @@ endmodule: crc16Receiver
  * When there have been six 1'b1s in a row, a 0 bit is added to the output
  * sequence and the stall flag is toggled.
  */
-// for stuffing bits. 
-//          NOTE: damnit linky.
 module bitStuffer(
   input   logic       clk, rst_L,
   input   bit         pkt_avail,
@@ -1160,8 +1167,6 @@ module bitStuffer(
   assign send_stall = state == STALL;
   assign clr = state == IDLE;
 
-  // counter for counting 1's. sounds like a band name
-  //        NOTE:  ...
   counter #(3) onesCnt(.clk(clk), .rst_L(rst_L), .clr(send_stall|clr|~bit_in),
                        .ld(), .en(bit_in), .up(bit_in), .val(), .cnt(cnt));
 
@@ -1284,9 +1289,14 @@ module nrzi(
   end
 endmodule: nrzi
 
-// decodes nrzi stream if it is not an outgoing packet (~sending).
-// bit_stream is 1 if current stream_in is the same as prev_bit,
-// 0 if current stream_in is different from prev_bit.
+
+/***************
+ *  NRZI_DEC   *
+ ***************
+ * Decodes nrzi stream if it is not an outgoing packet(~sending).  The 
+ * bit_stream is 1 if current stream_in is the same as prev_bit, or 0 if 
+ * the current stream_in is different from prev_bit.
+ */
 module nrzi_dec(
   input   logic clk, rst_L,
   input   bit   stream_in, sending, ack, invalid_input,
@@ -1305,6 +1315,7 @@ module nrzi_dec(
   assign bit_stream = (sending) ? 0 : ~(stream_in ^ prev_bit) ;
 
 endmodule: nrzi_dec
+
 
 /************
  *   DPDM   *
@@ -1346,13 +1357,14 @@ module dpdm(
 
   always_comb begin
     next_DPDM_state = DPDM_state;
-    // sending stuff
+    // sending
     en = 1'b0;
     en_dp = 0;
     en_dm = 0;
     pkt_sent = 1'b0;
-    // receiving stuff
-    sending = 0;    // is asserted from first bit of SYNC to last bit of EOP
+    // receiving
+    // sending is asserted from first bit of SYNC to last bit of EOP
+    sending = 0;
     EOP_ok = 1;
     case (DPDM_state)
       IDLE:   begin
