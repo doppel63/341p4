@@ -32,6 +32,11 @@ module test(
 
   end
 
+  initial begin
+    #2000 $display("TIME OUT FROM TB");
+    $finish;
+  end
+
 endmodule: test
 
 // test bit stream encoder
@@ -699,15 +704,17 @@ module FSM_tb;
   pkt_t pkt_in;
 
   // internal outputs from protocol
+  logic ack, protocol_OK;
   pkt_t pkt_out;
 
   // inputs from tb
-  logic         clk, rst_L;
-  logic read, start;
+  logic        clk, rst_L;
+  logic        read, start;
   logic [15:0] mempage;
   logic [63:0] write_data;
 
   // outputs
+  logic        done, trans_OK;
   logic [63:0] data_tb;
 
   protocolFSM pFSM(.*);
