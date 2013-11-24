@@ -13,14 +13,25 @@ module test(
     rst_L = 0;  @(posedge clk);
     rst_L <= 1; @(posedge clk);
     // check normal operation
+    /*
     // write
     $display($time,, "Writing 64'h1234_5678_90AB_CDEF to addr 16'hABCD");
     flash_addr = 16'hABCD;  flash_data = 64'h1234_5678_90AB_CDEF;
     host.writeData(flash_addr, flash_data, success);
     if (success) $display("successful write!");
     else $display($time,, "unsuccessful write");
-    // read
+    */
+    // try reading from uninitialized memory
     $display($time,, "Reading from addr 16'hABCD");
+    flash_addr = 16'hABCD; flash_data = 0;
+    host.readData(flash_addr, receivedMsg, success);
+    if (success)
+      if (receivedMsg == flash_data) $display("successful read!");
+      else $display("successful read, but got %x instead of %x",
+                    receivedMsg, flash_data);
+    else $display($time,, "unsuccessful read");
+    $display($time,, "Reading from addr 16'h0001");
+    flash_addr = 16'h0001; flash_data = 0;
     host.readData(flash_addr, receivedMsg, success);
     if (success)
       if (receivedMsg == flash_data) $display("successful read!");
@@ -28,15 +39,80 @@ module test(
                     receivedMsg, flash_data);
     else $display($time,, "unsuccessful read");
 
-    // try reading from uninitialized memory
-    $display($time,, "Reading from addr 16'hABCE");
-    flash_addr = 16'hABCE;
+    // write
+    $display($time,, "Writing 64'hCAFE_BABE_DEAD_BEEF to addr 16'hABCD");
+    flash_addr = 16'hABCD;  flash_data = 64'hCAFE_BABE_DEAD_BEEF;
+    host.writeData(flash_addr, flash_data, success);
+    if (success) $display("successful write!");
+    else $display($time,, "unsuccessful write");
+    // read
+    $display($time,, "Reading from addr 16'hABCD");
     host.readData(flash_addr, receivedMsg, success);
     if (success)
-      if (receivedMsg == 0) $display("successful read!");
+      if (receivedMsg == 64'hCAFE_BABE_DEAD_BEEF) $display("successful read!");
+      else $display("successful read, but got %x instead of %x",
+                    receivedMsg, 64'hCAFE_BABE_DEAD_BEEF);
+    else $display($time,, "unsuccessful read");
+    $display($time,, "Reading from addr 16'h0001");
+    flash_addr = 16'h0001; flash_data = 0;
+    host.readData(flash_addr, receivedMsg, success);
+    if (success)
+      if (receivedMsg == flash_data) $display("successful read!");
       else $display("successful read, but got %x instead of %x",
                     receivedMsg, flash_data);
     else $display($time,, "unsuccessful read");
+
+    $display($time,, "Writing 64'h1234_5678_90AB_CDEF to addr 16'h0001");
+    flash_addr = 16'h0001;  flash_data = 64'h1234_5678_90AB_CDEF;
+    host.writeData(flash_addr, flash_data, success);
+    if (success) $display("successful write!");
+    else $display($time,, "unsuccessful write");
+    $display($time,, "Reading from addr 16'hABCD");
+    flash_addr = 16'hABCD; flash_data = 64'hCAFE_BABE_DEAD_BEEF;
+    host.readData(flash_addr, receivedMsg, success);
+    if (success)
+      if (receivedMsg == flash_data) $display("successful read!");
+      else $display("successful read, but got %x instead of %x",
+                    receivedMsg, flash_data);
+    else $display($time,, "unsuccessful read");
+    $display($time,, "Reading from addr 16'h0001");
+    flash_addr = 16'h0001; flash_data = 64'h1234_5678_90AB_CDEF;
+    host.readData(flash_addr, receivedMsg, success);
+    if (success)
+      if (receivedMsg == 64'h1234_5678_90AB_CDEF) $display("successful read!");
+      else $display("successful read, but got %x instead of %x",
+                    receivedMsg, 64'h1234_5678_90AB_CDEF);
+    else $display($time,, "unsuccessful read");
+
+
+    rst_L = 0;  @(posedge clk);
+    rst_L <= 1; @(posedge clk);
+    host.start <= 1; host.read <= 1; host.p_mempage <= 16'hABCD;
+    @(posedge clk);
+    host.start <= 0;
+    #384 force wires.DP = 0;
+    force wires.DM = 0;
+    wait(host.done)
+    @(posedge clk);
+    release wires.DP;
+    release wires.DM;
+    assert(~host.trans_OK);
+    $display("tested total time out");
+    // write
+    $display($time,, "Writing 64'hCAFE_BABE_DEAD_BEEF to addr 16'hABCD");
+    flash_addr = 16'hABCD;  flash_data = 64'hCAFE_BABE_DEAD_BEEF;
+    host.writeData(flash_addr, flash_data, success);
+    if (success) $display("successful write!");
+    else $display($time,, "unsuccessful write");
+    // read
+    $display($time,, "Reading from addr 16'hABCD");
+    host.readData(flash_addr, receivedMsg, success);
+    if (success)
+      if (receivedMsg == 64'hCAFE_BABE_DEAD_BEEF) $display("successful read!");
+      else $display("successful read, but got %x instead of %x",
+                    receivedMsg, 64'hCAFE_BABE_DEAD_BEEF);
+    else $display($time,, "unsuccessful read");
+
 
 
     @(posedge clk);
@@ -44,11 +120,12 @@ module test(
 
   end
 
+/*
   initial begin
     #2000 $display("TIME OUT FROM TB");
     $finish;
   end
-
+*/
 endmodule: test
 
 // test bit stream encoder

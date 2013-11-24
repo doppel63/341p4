@@ -291,6 +291,8 @@ module protocolFSM(
     clear = 1'b0;
     error = 0;
     ack = 0;
+    pkt_out.data = data_in;
+    data_out = pkt_in.data;
     case (protocolState)
       IDLE:   begin
                 corruptClr = 1'b1;
