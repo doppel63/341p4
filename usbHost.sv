@@ -242,24 +242,24 @@ module protocolFSM(
   output  logic       protocol_avail, // to R/W FSM
   output  logic       protocol_OK); // to R/W FSM
 
-  enum    logic [2:0] {IDLE, WAIT_IN, IN, WAIT_OUT, WAIT_OUT2, OUT, STANDBY
-                      } protocolState, nextProtocolState;
+  enum    logic [2:0] {IDLE, WAIT_IN, IN, WAIT_OUT, WAIT_OUT2, OUT, STANDBY,
+                      ERROR} protocolState, nextProtocolState;
 
   logic               error;
   logic               timeoutEn, timeoutClr;
   logic               totalTimeoutEn, totalTimeoutClr;
   logic               corruptEn, corruptClr;
-  logic [2:0]         totalTimeoutCtr, corruptCtr;
+  logic [3:0]         totalTimeoutCtr, corruptCtr;
   logic [7:0]         timeoutCtr;
 
   counter #(8)  timeout(.clk(clk), .rst_L(rst_L), .clr(timeoutClr), .ld(1'b0),
                         .en(timeoutEn), .up(1'b1), .val(8'b0),
                         .cnt(timeoutCtr));
-  counter #(3)  totalTimeouts(.clk(clk), .rst_L(rst_L), .clr(totalTimeoutClr),
-                        .ld(1'b0), .en(totalTimeoutEn), .up(1'b1), .val(3'b0),
+  counter #(4)  totalTimeouts(.clk(clk), .rst_L(rst_L), .clr(totalTimeoutClr),
+                        .ld(1'b0), .en(totalTimeoutEn), .up(1'b1), .val(4'b0),
                         .cnt(totalTimeoutCtr));
-  counter #(3)  corrupt(.clk(clk), .rst_L(rst_L), .clr(corruptClr), .ld(1'b0),
-                        .en(corruptEn), .up(1'b1), .val(3'b0),
+  counter #(4)  corrupt(.clk(clk), .rst_L(rst_L), .clr(corruptClr), .ld(1'b0),
+                        .en(corruptEn), .up(1'b1), .val(4'b0),
                         .cnt(corruptCtr));
 
   always_ff @(posedge clk or negedge rst_L) begin
@@ -272,7 +272,7 @@ module protocolFSM(
   always_ff @(posedge clk, negedge rst_L) begin
     if (~rst_L)
       protocol_OK <= 1;
-    else if (clear)
+    else if (pStart)
       protocol_OK <= 1;
     else if (error)
       protocol_OK <= 0;
@@ -297,7 +297,7 @@ module protocolFSM(
       IDLE:   begin
                 corruptClr = 1'b1;
                 timeoutClr = 1'b1;
-                corruptClr = 1'b1;
+                totalTimeoutClr = 1'b1;
                 // if IN, transmit PKT_IN
                 if (pStart) begin
                   if (transaction) begin
@@ -318,9 +318,6 @@ module protocolFSM(
                 end
               end
       WAIT_IN: begin
-                corruptClr = 1'b0;
-                timeoutClr = 1'b0;
-                corruptClr = 1'b0;
                 if (pkt_sent)
                   nextProtocolState = IN;
                 else
@@ -332,12 +329,14 @@ module protocolFSM(
                   // if data is corrupt send it a NAK
                   if (~pkt_ok) begin
                     corruptEn = 1'b1;
+                    timeoutClr = 1'b1;
                     pkt_avail = 1'b1;
                     pkt_out.pid = PID_NAK;
                     // if 8th time corrupt quit
-                    if (corruptCtr == 7) begin
+                    if (corruptCtr == 8) begin
                       error = 1;
-                      nextProtocolState = STANDBY;
+                      pkt_avail = 0;
+                      nextProtocolState = ERROR;
                     end
                     else
                       nextProtocolState = WAIT_IN;
@@ -360,9 +359,10 @@ module protocolFSM(
                     pkt_avail = 1'b1;
                     pkt_out.pid = PID_NAK;
                     // if 8th time timed out quit
-                    if (totalTimeoutCtr == 7) begin
+                    if (totalTimeoutCtr == 8) begin
                       error = 1;
-                      nextProtocolState = STANDBY;
+                      pkt_avail = 0;
+                      nextProtocolState = ERROR;
                     end
                     else
                       nextProtocolState = WAIT_IN;
@@ -371,7 +371,7 @@ module protocolFSM(
               end
       STANDBY: begin
                 if (pkt_sent) begin
-                  clear = 1'b1;
+                  // clear = 1'b1;
                   protocol_avail = 1'b1;
                   nextProtocolState = IDLE;
                 end
@@ -379,9 +379,6 @@ module protocolFSM(
                   nextProtocolState = STANDBY;
               end
       WAIT_OUT: begin
-                  corruptClr = 1'b0;
-                  timeoutClr = 1'b0;
-                  corruptClr = 1'b0;
                   if (pkt_sent) begin
                     nextProtocolState = WAIT_OUT2;
                     pkt_avail = 1'b1;
@@ -408,13 +405,15 @@ module protocolFSM(
                       // data was corrupted
                       else if (pkt_in.pid == PID_NAK) begin
                         corruptEn = 1'b1;
+                        timeoutClr = 1'b1;
                         pkt_avail = 1'b1;
                         pkt_out.pid = PID_DATA;
                         pkt_out.data = data_in; // assume data always on line
                         // data was corrupted for 8th time
-                        if (corruptCtr == 7) begin
+                        if (corruptCtr == 8) begin
                           error = 1;
-                          nextProtocolState = STANDBY;
+                          pkt_avail = 0;
+                          nextProtocolState = ERROR;
                         end
                         else
                           nextProtocolState = WAIT_OUT2;
@@ -441,6 +440,10 @@ module protocolFSM(
                       else
                         nextProtocolState = OUT;
                     end
+                  end
+      ERROR:      begin
+                    protocol_avail = 1;
+                    nextProtocolState = IDLE;
                   end
                 endcase
   end

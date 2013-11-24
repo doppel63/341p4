@@ -124,7 +124,8 @@ module test(
     @(posedge clk);
     release wires.DP;
     release wires.DM;
-    repeat (7) begin
+    //while (~host.done) begin
+    repeat (8) begin
       wait(host.pkt_sent)
       #40 force wires.DP = 0;
       force wires.DM = 0;
@@ -132,10 +133,10 @@ module test(
       release wires.DP;
       release wires.DM;
     end
-    wait(host.done);
+    //wait(host.done);
     @(posedge clk);
     // ??
-    // assert(~host.trans_OK);
+    assert(~host.trans_OK);
     $display("tested total corrupted data (8x)");
     // write
     $display($time,, "Writing 64'hCAFE_BABE_DEAD_BEEF to addr 16'hABCD");
@@ -152,20 +153,17 @@ module test(
                     receivedMsg, 64'hCAFE_BABE_DEAD_BEEF);
     else $display($time,, "unsuccessful read");
 
-
-
-
     @(posedge clk);
     $finish;
 
   end
 
-/*
+
   initial begin
-    #2000 $display("TIME OUT FROM TB");
+    #20000 $display("TIME OUT FROM TB");
     $finish;
   end
-*/
+
 endmodule: test
 
 // test bit stream encoder
