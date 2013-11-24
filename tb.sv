@@ -114,6 +114,46 @@ module test(
     else $display($time,, "unsuccessful read");
 
 
+    rst_L = 0;  @(posedge clk);
+    rst_L <= 1; @(posedge clk);
+    host.start <= 1; host.read <= 1; host.p_mempage <= 16'hABCD;
+    @(posedge clk);
+    host.start <= 0;
+    #440 force wires.DP = 0;
+    force wires.DM = 0;
+    @(posedge clk);
+    release wires.DP;
+    release wires.DM;
+    repeat (7) begin
+      wait(host.pkt_sent)
+      #40 force wires.DP = 0;
+      force wires.DM = 0;
+      repeat (3) @(posedge clk);
+      release wires.DP;
+      release wires.DM;
+    end
+    wait(host.done);
+    @(posedge clk);
+    // ??
+    // assert(~host.trans_OK);
+    $display("tested total corrupted data (8x)");
+    // write
+    $display($time,, "Writing 64'hCAFE_BABE_DEAD_BEEF to addr 16'hABCD");
+    flash_addr = 16'hABCD;  flash_data = 64'hCAFE_BABE_DEAD_BEEF;
+    host.writeData(flash_addr, flash_data, success);
+    if (success) $display("successful write!");
+    else $display($time,, "unsuccessful write");
+    // read
+    $display($time,, "Reading from addr 16'hABCD");
+    host.readData(flash_addr, receivedMsg, success);
+    if (success)
+      if (receivedMsg == 64'hCAFE_BABE_DEAD_BEEF) $display("successful read!");
+      else $display("successful read, but got %x instead of %x",
+                    receivedMsg, 64'hCAFE_BABE_DEAD_BEEF);
+    else $display($time,, "unsuccessful read");
+
+
+
 
     @(posedge clk);
     $finish;
