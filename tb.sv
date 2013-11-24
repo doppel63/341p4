@@ -27,6 +27,18 @@ module test(
       else $display("successful read, but got %x instead of %x",
                     receivedMsg, flash_data);
     else $display($time,, "unsuccessful read");
+
+    // try reading from uninitialized memory
+    $display($time,, "Reading from addr 16'hABCE");
+    flash_addr = 16'hABCE;
+    host.readData(flash_addr, receivedMsg, success);
+    if (success)
+      if (receivedMsg == 0) $display("successful read!");
+      else $display("successful read, but got %x instead of %x",
+                    receivedMsg, flash_data);
+    else $display($time,, "unsuccessful read");
+
+
     @(posedge clk);
     $finish;
 
