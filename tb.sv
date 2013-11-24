@@ -124,7 +124,6 @@ module test(
     @(posedge clk);
     release wires.DP;
     release wires.DM;
-    //while (~host.done) begin
     repeat (8) begin
       wait(host.pkt_sent)
       #40 force wires.DP = 0;
@@ -133,9 +132,8 @@ module test(
       release wires.DP;
       release wires.DM;
     end
-    //wait(host.done);
+    wait(host.done);
     @(posedge clk);
-    // ??
     assert(~host.trans_OK);
     $display("tested total corrupted data (8x)");
     // write
