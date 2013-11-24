@@ -1,3 +1,18 @@
+`define types
+
+`ifdef types
+  typedef enum bit [7:0] {PID_OUT = 8'b1110_0001, PID_IN = 8'b0110_1001,
+                          PID_DATA = 8'b1100_0011,
+                          PID_ACK = 8'b1101_0010, PID_NAK = 8'b0101_1010} pid_t;
+
+  typedef struct packed {
+    pid_t       pid;
+    bit [6:0]   addr;
+    bit [3:0]   endp;
+    bit [63:0]  data;
+  } pkt_t;
+`endif
+
 // main testbench
 module test(
   output  logic clk, rst_L);
