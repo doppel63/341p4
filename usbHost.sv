@@ -1183,7 +1183,10 @@ module bitStuffer(
     else begin
       case (state)
         IDLE:     state <= (send_start) ? COUNTING : IDLE;
-        COUNTING: state <= (cnt == 5 && bit_in) ? STALL : COUNTING;
+        COUNTING: if (send_last)
+                    state <= IDLE;
+                  else
+                    state <= (cnt == 5 && bit_in) ? STALL : COUNTING;
         STALL:    state <= (send_last) ? IDLE : COUNTING;
         default:  state <= state;
       endcase
