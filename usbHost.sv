@@ -92,6 +92,8 @@ module usbHost(
     output  bit         success);
 
     start <= 1; read <= 1; p_mempage <= mempage;
+    @(posedge clk);
+    start <= 0;
     wait(done)
     data <= data_tb; success <= trans_OK;
     @(posedge clk);
@@ -107,6 +109,8 @@ module usbHost(
     output  bit         success);
 
     start <= 1; read <= 0; p_mempage <= mempage; write_data <= data;
+    @(posedge clk);
+    start <= 0;
     wait(done)
     success <= trans_OK;
     @(posedge clk);
@@ -285,6 +289,7 @@ module protocolFSM(
     protocol_avail = 1'b0;
     clear = 1'b0;
     error = 0;
+    ack = 0;
     case (protocolState)
       IDLE:   begin
                 corruptClr = 1'b1;
@@ -341,7 +346,6 @@ module protocolFSM(
                     pkt_avail = 1'b1;
                     pkt_out.pid = PID_ACK;
                     data_out = pkt_in.data;
-                    protocol_avail = 1'b1;
                     nextProtocolState = STANDBY;
                   end
                 end
@@ -603,7 +607,7 @@ endmodule: bitStreamEncoder
 module bitStreamDecoder(
   input   logic clk, rst_L,
   // to rest of receiver stuff
-  input   bit   bit_in, rcv_stall,
+  input   bit   bit_in, rcv_stall, sending,
   input   bit   bit_stuff_ok, EOP_ok, invalid_input,
   output  bit   rcv_start, rcv_last,
   // to protocol FSM
@@ -673,7 +677,7 @@ module bitStreamDecoder(
       data_cnt <= 0;
       done_cnt <= 0;
     end
-    else if (ack) begin
+    else if (ack | sending) begin
       state <= WAIT;
       sync_cnt <= 0;
       pid_cnt <= 0;
